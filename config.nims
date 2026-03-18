@@ -17,8 +17,7 @@ proc requireDirs(dirs: seq[string], hintCmd: string) =
 when defined(windows):
   requireDirs(@["lib\\vs"], ".\\scripts\\init_win.ps1")
 elif defined(macosx):
-#   requireDirs(@["lib/osx"], "./scripts/init_mac.sh")
-    discard
+  requireDirs(@["lib/osx"], "./scripts/init_mac.sh")
 
 switch("backend", "cpp")
 
@@ -38,3 +37,14 @@ switch("passC", "-Iinclude")
 
 when defined(windows):
   switch("passL", "lib\\vs\\x64\\TrussC.lib")
+elif defined(macosx):
+  switch("passL", "lib/osx/libTrussC.a")
+  switch("passL", "-framework CoreFoundation")
+  switch("passL", "-framework AudioToolbox")
+  switch("passL", "-framework CoreGraphics")
+  switch("passL", "-framework Metal")
+  switch("passL", "-framework AppKit")
+  switch("passL", "-framework Foundation")
+  switch("passL", "-framework QuartzCore")
+  switch("passL", "-lobjc")
+  switch("passL", fmt"-rpath {projectRoot}/lib/osx")
