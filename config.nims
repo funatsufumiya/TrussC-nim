@@ -15,6 +15,24 @@ proc requireDirs(dirs: seq[string], hintCmd: string) =
       quit(fmt"[Error] {p} not found.{newline}Please run: {hintCmd} to install the libraries and retry.{newline}")
 
 when defined(windows):
-  requireDirs(@["lib\\vs"], ".\\scripts\\init_win.ps1")
+#   requireDirs(@["lib\\vs"], ".\\scripts\\init_win.ps1")
+    discard
 elif defined(macosx):
-  requireDirs(@["lib/osx"], "./scripts/init_mac.sh")
+#   requireDirs(@["lib/osx"], "./scripts/init_mac.sh")
+    discard
+
+switch("backend", "cpp")
+
+when defined(windows):
+  # switch("cc", "vcc")
+  switch("cc", "clang_cl")
+  switch("passC", "/std:c++17")
+  switch("passC", "/utf-8")
+  switch("passC", "/MD")
+  switch("passC", "/DWIN32_LEAN_AND_MEAN")
+  switch("passC", "/DNOMINMAX")
+else:
+  switch("passC", "-std=c++17")
+
+switch("path", "src")
+switch("passC", "-Iinclude")
