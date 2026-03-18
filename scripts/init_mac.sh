@@ -28,5 +28,5 @@ fetch() {
 }
 
 fetch "$LIB_URL" "$LIB_DEST"
-fetch "$DYLIB_URL" "$DYLIB_DEST"
+# fetch "$DYLIB_URL" "$DYLIB_DEST"
 echo "Done."

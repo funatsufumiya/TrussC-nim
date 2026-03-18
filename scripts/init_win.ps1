@@ -29,7 +29,7 @@ function Fetch-And-Extract($url, $destRel) {
 
 try {
   Fetch-And-Extract -url $LibUrl -destRel $LibDest
-  Fetch-And-Extract -url $DllUrl -destRel $DllDest
+  # Fetch-And-Extract -url $DllUrl -destRel $DllDest
 } finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

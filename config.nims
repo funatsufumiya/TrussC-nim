@@ -15,8 +15,7 @@ proc requireDirs(dirs: seq[string], hintCmd: string) =
       quit(fmt"[Error] {p} not found.{newline}Please run: {hintCmd} to install the libraries and retry.{newline}")
 
 when defined(windows):
-#   requireDirs(@["lib\\vs"], ".\\scripts\\init_win.ps1")
-    discard
+  requireDirs(@["lib\\vs"], ".\\scripts\\init_win.ps1")
 elif defined(macosx):
 #   requireDirs(@["lib/osx"], "./scripts/init_mac.sh")
     discard
@@ -36,3 +35,6 @@ else:
 
 switch("path", "src")
 switch("passC", "-Iinclude")
+
+when defined(windows):
+  switch("passL", "lib\\vs\\x64\\TrussC.lib")
