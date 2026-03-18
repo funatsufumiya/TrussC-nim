@@ -1,0 +1,10 @@
+*.exe
+*.pdb
+*.i
+.vscode
+lib/*
+!lib/.gitkeep
+/*.dylib
+/*.dll
+generated/*
+!generated/.gitkeep
