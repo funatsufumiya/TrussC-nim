@@ -43,7 +43,7 @@ proc keyPressed(key: cint) {.cdecl.} =
   if ckey == 'f' or ckey == 'F':
     discard global.toggleFullscreen()
   elif key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
-    discard global.sapp_request_quit()
+    discard global.exitApp()
 
 when isMainModule:
   showConsole() # this is necessary to see logs

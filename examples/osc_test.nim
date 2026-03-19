@@ -35,7 +35,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     let ckey = cast[char](key)
     echo "key: ", $ckey
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
-        discard global.sapp_request_quit()
+        discard global.exitApp()
 
 when isMainModule:
     showConsole() # this is necessary to see logs
