@@ -48,12 +48,15 @@ switch("passC", "-Iinclude")
 
 include "addons.nims"
 
-# load xxx.nim.addons (selectAddonsFile defined in addons.nims)
+# load xxx.nim.addons
 let preferredAddons = selectAddonsFile(projectRoot, mainNimRelPath)
 if preferredAddons.len > 0:
   let localAddonsDir = joinPath(projectRoot, "addons")
   if dirExists(localAddonsDir):
     processAddons(preferredAddons, localAddonsDir, projectRoot)
+  else:
+    let nl = "\n"
+    quit(fmt"[Error] addons file found: {preferredAddons}{nl}but addons directory not present: {localAddonsDir}{nl}Create the directory or remove the addons file and retry.{nl}")
 
 when defined(windows):
   switch("passL", "lib\\vs\\x64\\TrussC.lib")

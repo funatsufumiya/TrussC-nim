@@ -8,3 +8,5 @@ lib/*
 /*.dll
 generated/*
 !generated/.gitkeep
+addons/*
+!addons/.gitkeep
