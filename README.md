@@ -124,5 +124,4 @@ Now you can build them. If you have (need) additional headers (such as `hap.h`),
 
 ## TODO
 
-- Usage instruction for addons having CMakeLists.txt
 - Linux support (etc)
