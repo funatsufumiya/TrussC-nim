@@ -177,7 +177,9 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
           if nfn.startsWith(projn):
             rel = nf.substr(proj.len)
             if rel.startsWith("/"): rel = rel.substr(1)
-          if rel notin discoveredCppSources: discoveredCppSources.add(rel)
+          if rel notin discoveredCppSources:
+            logAdd(fmt"add source: {rel}")
+            discoveredCppSources.add(rel)
       let inc = joinPath(addonPath, "include")
       if dirExists(inc): addInclude(inc)
 
@@ -195,3 +197,4 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
       let s_end = ".}"
       contents.add(fmt"{s_start} {dq}{s}{dq}{s_end}{nl}")
     writeFile(outPath, contents)
+    logAdd(fmt"wrote generated file: {outPath}")
