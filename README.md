@@ -72,7 +72,24 @@ $ nim c -r examples/hello.nim
 $ nim c -r examples/cpp_interop.nim
 ```
 
+## How to use tcx addons
+
+- At first, create `xxx.nim.addons` at side of the nim file.
+    ```txt
+    tcxOsc
+    ```
+- Copy tcxXXX folder into `addons/tcxXXX` (such as tcxOsc) from openFrameworks directory (or other github repository)
+- Then try `nim c -r examples\osc_test.nim`
+    - You can debug addon parse log by  `-d:addonsDebug`, such as `nim c -d:addonsDebug -r examples\osc_test.nim`
+
+### NOTE: `import tcx_addons`
+
+When you use ofx addons, you need `import tcx_addons` on nim side. This includes `generated/addon_dependencies.nim` on nim side, in order to compile required C++ files.
+
+See [`examples/osc_test.nim`](examples/osc_test.nim) for detail.
+
+
 ## TODO
 
-- addons
+- Usage instruction for addons having CMakeLists.txt
 - Linux support (etc)
