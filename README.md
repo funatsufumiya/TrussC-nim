@@ -131,7 +131,7 @@ tcxHap
 
 Now you can build them. If you have (need) additional headers (such as `hap.h`), please put them into `addons/tcxXXX/src` or root `include` folder.
 
-(For tcxHap, I prepared [tcxHap.zip](https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/tcxHap.zip) having necessary prebuilt files for vs/osx.)
+(For example `tcxHap`, I prepared [tcxHap.zip](https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/tcxHap.zip) having necessary prebuilt files for vs/osx.)
 
 ## Screenshots
 
