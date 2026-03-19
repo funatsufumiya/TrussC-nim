@@ -5,6 +5,8 @@
 - TrussC version [v0.3.1 (2e8381a)](https://github.com/TrussC-org/TrussC/commit/2e8381a17b46edc4234925558ba336f753276e23)
 - nim v2.2.8
 
+![docs/screenshot.png](docs/screenshot.png)
+
 ```nim
 import tcApp
 import std/strformat
