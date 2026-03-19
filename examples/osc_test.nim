@@ -24,7 +24,6 @@ proc setup() {.cdecl.} =
     discard osc_msg.setAddress("/test")
     discard osc_sender.send(osc_msg)
     discard osc_msg.clear()
-    # var osc_sender = cppinit(ofxOscSender)
 
 proc update() {.cdecl.} =
     discard
