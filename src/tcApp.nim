@@ -8,7 +8,7 @@ type
   MouseButtonFn* = proc(x: cint, y: cint, button: cint){.cdecl.}
   EnterExitFn* = proc(x: cint, y: cint){.cdecl.}
   ResizeFn* = proc(w: cint, h: cint){.cdecl.}
-  DragFn* = proc(info: pointer){.cdecl.}
+  FilesDroppedFn* = proc(info: pointer){.cdecl.}
   MessageFn* = proc(msg: pointer){.cdecl.}
   ExitFn* = proc(){.cdecl.}
 
@@ -25,7 +25,7 @@ using MouseMoveFn = void(*)(int, int);
 using MouseButtonFn = void(*)(int, int, int);
 using EnterExitFn = void(*)(int, int);
 using ResizeFn = void(*)(int, int);
-using DragFn = void(*)(void*);
+using FilesDroppedFn = void(*)(void*);
 using MessageFn = void(*)(void*);
 using ExitFn = void(*)();
 
@@ -42,7 +42,7 @@ struct NimCallbacks {
   EnterExitFn mouseEntered;
   EnterExitFn mouseExited;
   ResizeFn windowResized;
-  DragFn dragEvent;
+  FilesDroppedFn filesDropped;
   MessageFn gotMessage;
   ExitFn exit;
 };
@@ -62,7 +62,7 @@ inline std::shared_ptr<NimCallbacks> tcn_makeCallbacks() {
   p->mouseEntered = nullptr;
   p->mouseExited = nullptr;
   p->windowResized = nullptr;
-  p->dragEvent = nullptr;
+  p->filesDropped = nullptr;
   p->gotMessage = nullptr;
   p->exit = nullptr;
   return p;
@@ -88,7 +88,7 @@ public:
   void mouseDragged(tc::Vec2 pos, int button) override { if(cb_ && cb_->mouseDragged) cb_->mouseDragged((int)pos.x, (int)pos.y, button); }
   void mouseScrolled(tc::Vec2 delta) override { (void)delta; }
   void windowResized(int w, int h) override { if(cb_ && cb_->windowResized) cb_->windowResized(w, h); }
-  void filesDropped(const std::vector<std::string>& files) override { if(cb_ && cb_->dragEvent) cb_->dragEvent((void*)&files); }
+  void filesDropped(const std::vector<std::string>& files) override { if(cb_ && cb_->filesDropped) cb_->filesDropped((void*)&files); }
   void exit() override { if(cb_ && cb_->exit) cb_->exit(); }
 };
 
@@ -136,7 +136,7 @@ extern "C" {
   inline void tcn_setMouseEntered_c(void* cb, EnterExitFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->mouseEntered = f; }
   inline void tcn_setMouseExited_c(void* cb, EnterExitFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->mouseExited = f; }
   inline void tcn_setWindowResized_c(void* cb, ResizeFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->windowResized = f; }
-  inline void tcn_setDragEvent_c(void* cb, DragFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->dragEvent = f; }
+  inline void tcn_setFilesDropped_c(void* cb, FilesDroppedFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->filesDropped = f; }
   inline void tcn_setGotMessage_c(void* cb, MessageFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->gotMessage = f; }
   inline void tcn_setExit_c(void* cb, ExitFn f) { (*(std::shared_ptr<NimCallbacks>*)cb)->exit = f; }
 }
@@ -159,7 +159,7 @@ proc tcn_setMouseReleased_c(cb: pointer, f: MouseButtonFn) {.importc: "tcn_setMo
 proc tcn_setMouseEntered_c(cb: pointer, f: EnterExitFn) {.importc: "tcn_setMouseEntered_c", cdecl.}
 proc tcn_setMouseExited_c(cb: pointer, f: EnterExitFn) {.importc: "tcn_setMouseExited_c", cdecl.}
 proc tcn_setWindowResized_c(cb: pointer, f: ResizeFn) {.importc: "tcn_setWindowResized_c", cdecl.}
-proc tcn_setDragEvent_c(cb: pointer, f: DragFn) {.importc: "tcn_setDragEvent_c", cdecl.}
+proc tcn_setFilesDropped_c(cb: pointer, f: FilesDroppedFn) {.importc: "tcn_setFilesDropped_c", cdecl.}
 proc tcn_setGotMessage_c(cb: pointer, f: MessageFn) {.importc: "tcn_setGotMessage_c", cdecl.}
 proc tcn_setExit_c(cb: pointer, f: ExitFn) {.importc: "tcn_setExit_c", cdecl.}
 
@@ -179,7 +179,7 @@ type TcAppConfig* = object
   mouseEntered*: EnterExitFn
   mouseExited*: EnterExitFn
   windowResized*: ResizeFn
-  dragEvent*: DragFn
+  filesDropped*: FilesDroppedFn
   gotMessage*: MessageFn
   exit*: ExitFn
 
@@ -196,7 +196,7 @@ proc makeTcApp*(
   mouseEntered: EnterExitFn = nil;
   mouseExited: EnterExitFn = nil;
   windowResized: ResizeFn = nil;
-  dragEvent: DragFn = nil;
+  filesDropped: FilesDroppedFn = nil;
   gotMessage: MessageFn = nil;
   exit: ExitFn = nil;
   ): TcApp =
@@ -215,7 +215,7 @@ proc makeTcApp*(
   if mouseEntered != nil: tcn_setMouseEntered_c(a.cb, mouseEntered)
   if mouseExited != nil: tcn_setMouseExited_c(a.cb, mouseExited)
   if windowResized != nil: tcn_setWindowResized_c(a.cb, windowResized)
-  if dragEvent != nil: tcn_setDragEvent_c(a.cb, dragEvent)
+  if filesDropped != nil: tcn_setFilesDropped_c(a.cb, filesDropped)
   if gotMessage != nil: tcn_setGotMessage_c(a.cb, gotMessage)
   if exit != nil: tcn_setExit_c(a.cb, exit)
   return a
@@ -234,7 +234,7 @@ proc makeTcApp*(cfg: TcAppConfig): TcApp =
     mouseEntered = cfg.mouseEntered,
     mouseExited = cfg.mouseExited,
     windowResized = cfg.windowResized,
-    dragEvent = cfg.dragEvent,
+    filesDropped = cfg.filesDropped,
     gotMessage = cfg.gotMessage,
     exit = cfg.exit
     )
