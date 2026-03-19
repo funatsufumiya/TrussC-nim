@@ -98,7 +98,7 @@ For example `tcpHap`, you should first create emptyProject using `tcpHap` by pro
 
 ![docs/hap_project_generator.png](docs/hap_project_generator.png)
 
-And build it as release build on Visual Studio or Xcode.
+And just build it (in release build mode) using Visual Studio or Xcode.
 
 Then you can find `.lib` or `.a` on project folders. You can find them by command such as `fd -uu lib$` (using [fd-find command](https://github.com/sharkdp/fd)) in the project folder.
 
