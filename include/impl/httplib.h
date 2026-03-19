@@ -3117,8 +3117,16 @@ inline ssize_t select_read(socket_t sock, time_t sec, time_t usec) {
 #endif
 
   fd_set fds;
+#ifdef _WIN32
+  /* Avoid FD_ZERO/FD_SET macros on Windows which can conflict with
+     problematic macro expansions in certain include orders. Manipulate
+     fd_set directly. */
+  fds.fd_count = 0;
+  fds.fd_array[fds.fd_count++] = static_cast<decltype(fds.fd_array[0])>(sock);
+#else
   FD_ZERO(&fds);
   FD_SET(sock, &fds);
+#endif
 
   timeval tv;
   tv.tv_sec = static_cast<long>(sec);
@@ -3144,9 +3152,15 @@ inline ssize_t select_write(socket_t sock, time_t sec, time_t usec) {
   if (sock >= FD_SETSIZE) { return -1; }
 #endif
 
+#ifdef _WIN32
+  fd_set fds;
+  fds.fd_count = 0;
+  fds.fd_array[fds.fd_count++] = static_cast<decltype(fds.fd_array[0])>(sock);
+#else
   fd_set fds;
   FD_ZERO(&fds);
   FD_SET(sock, &fds);
+#endif
 
   timeval tv;
   tv.tv_sec = static_cast<long>(sec);
@@ -3186,9 +3200,15 @@ inline Error wait_until_socket_is_ready(socket_t sock, time_t sec,
   if (sock >= FD_SETSIZE) { return Error::Connection; }
 #endif
 
+#ifdef _WIN32
+  fd_set fdsr;
+  fdsr.fd_count = 0;
+  fdsr.fd_array[fdsr.fd_count++] = static_cast<decltype(fdsr.fd_array[0])>(sock);
+#else
   fd_set fdsr;
   FD_ZERO(&fdsr);
   FD_SET(sock, &fdsr);
+#endif
 
   auto fdsw = fdsr;
   auto fdse = fdsr;
@@ -3203,7 +3223,20 @@ inline Error wait_until_socket_is_ready(socket_t sock, time_t sec,
 
   if (ret == 0) { return Error::ConnectionTimeout; }
 
+#ifdef _WIN32
+  bool is_set_r = false;
+  for (unsigned int __i = 0; __i < fdsr.fd_count; ++__i) {
+    if (fdsr.fd_array[__i] == static_cast<decltype(fdsr.fd_array[0])>(sock)) { is_set_r = true; break; }
+  }
+  bool is_set_w = false;
+  for (unsigned int __i = 0; __i < fdsw.fd_count; ++__i) {
+    if (fdsw.fd_array[__i] == static_cast<decltype(fdsw.fd_array[0])>(sock)) { is_set_w = true; break; }
+  }
+
+  if (ret > 0 && (is_set_r || is_set_w)) {
+#else
   if (ret > 0 && (FD_ISSET(sock, &fdsr) || FD_ISSET(sock, &fdsw))) {
+#endif
     auto error = 0;
     socklen_t len = sizeof(error);
     auto res = getsockopt(sock, SOL_SOCKET, SO_ERROR,

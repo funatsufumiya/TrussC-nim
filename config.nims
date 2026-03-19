@@ -39,6 +39,7 @@ when defined(windows):
   switch("passC", "/utf-8")
   switch("passC", "/MD")
   switch("passC", "/DWIN32_LEAN_AND_MEAN")
+  switch("passC", "/DFAR=")
   switch("passC", "/DNOMINMAX")
 else:
   switch("passC", "-std=c++17")

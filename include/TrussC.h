@@ -40,6 +40,14 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifdef FAR
+#undef FAR
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <psapi.h>
 #endif
