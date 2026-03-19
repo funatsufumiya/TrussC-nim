@@ -6,6 +6,17 @@ from std/sequtils import toSeq
 
 let projectRoot = parentDir(system.currentSourcePath)
 
+var detectedMainNim = ""
+var i = paramCount()
+while i >= 1:
+  let p = paramStr(i)
+  if p.len > 0 and p[0] != '-' and p.toLowerAscii().endsWith(".nim"):
+    detectedMainNim = p
+    break
+  i = i - 1
+
+let mainNimRelPath = detectedMainNim
+
 # Ensure required library folders exist; if missing, instruct user to run installer scripts.
 proc requireDirs(dirs: seq[string], hintCmd: string) =
   for d in dirs:
@@ -34,6 +45,15 @@ else:
 
 switch("path", "src")
 switch("passC", "-Iinclude")
+
+include "addons.nims"
+
+# load xxx.nim.addons (selectAddonsFile defined in addons.nims)
+let preferredAddons = selectAddonsFile(projectRoot, mainNimRelPath)
+if preferredAddons.len > 0:
+  let localAddonsDir = joinPath(projectRoot, "addons")
+  if dirExists(localAddonsDir):
+    processAddons(preferredAddons, localAddonsDir, projectRoot)
 
 when defined(windows):
   switch("passL", "lib\\vs\\x64\\TrussC.lib")
