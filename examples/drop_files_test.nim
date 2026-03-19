@@ -1,37 +1,28 @@
 import tcApp
-import tcx_addons
 import consoleUtil
 
 import std/strformat
+import std/strutils
 import nimline
 import cppstl
 
 {.emit: """
 #include "TrussC.h"
-#include "tcxHapPlayer.h"
 
 using namespace trussc;
 using namespace tc;
 """ .}
 
-# defineCppType(OscSender, "OscSender", "tcxOsc.h")
-# defineCppType(OscMessage, "OscMessage", "tcxOsc.h")
-
-# var osc_sender: OscSender
-# var osc_msg: OscMessage
+var str = "drop files here"
 
 proc setup() {.cdecl.} =
     discard
-    # discard osc_sender.setup("127.0.0.1", 12345)
-    # discard osc_msg.setAddress("/test")
-    # discard osc_sender.send(osc_msg)
-    # discard osc_msg.clear()
 
 proc update() {.cdecl.} =
     discard
 
 proc draw() {.cdecl.} =
-    discard
+    discard global.drawBitmapString(str, 10, 10)
 
 proc keyPressed(key: cint) {.cdecl.} =
     let ckey = cast[char](key)
@@ -39,9 +30,37 @@ proc keyPressed(key: cint) {.cdecl.} =
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
         discard global.sapp_request_quit()
 
+proc wrapText(s: string, width: int): string =
+    if width <= 0:
+        return s
+    result = ""
+    var cnt = 0
+    for ch in s:
+        result.add ch
+        inc cnt
+        if cnt >= width:
+            result.add '\n'
+            cnt = 0
+    return result
+
+proc baseName(path: string): string =
+    var i = path.len - 1
+    while i >= 0:
+        if path[i] == '/' or path[i] == '\\':
+            return path[i+1 .. ^1]
+        dec i
+    return path
+
 proc filesDropped(info: pointer) {.cdecl.} =
     let files = cast[ptr CppVector[CppString]](info)
     echo "files: ", $(files[])
+
+    var names: seq[string] = @[]
+    for i in 0 ..< files[].len:
+        let f = files[][i]
+        names.add(baseName($f))
+
+    str = wrapText(names.join(", "), 60)
 
 when isMainModule:
     showConsole() # this is necessary to see logs
