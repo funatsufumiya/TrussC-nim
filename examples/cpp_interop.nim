@@ -28,7 +28,14 @@ proc draw() {.cdecl.} =
     global.getMouseY() - 50,
     100, 100)
 
+proc keyPressed(key: cint) {.cdecl.} =
+  let ckey = cast[char](key)
+  if ckey == 'f' or ckey == 'F':
+    discard global.toggleFullscreen()
+  elif key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
+    discard global.sapp_request_quit()
+
 when isMainModule:
   showConsole() # this is necessary to see logs
-  var app = makeTcApp(setup=setup, update=update, draw=draw)
+  var app = makeTcApp(setup=setup, update=update, draw=draw, keyPressed=keyPressed)
   app.run(800, 600)
