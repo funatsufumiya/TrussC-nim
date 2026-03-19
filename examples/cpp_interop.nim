@@ -1,6 +1,7 @@
 import tcApp
 import std/strformat
 import nimline
+import consoleUtil
 
 {.emit: """
 #include "TrussC.h"
@@ -13,6 +14,7 @@ proc red {.importcpp: "tc::colors::red" .}
 
 proc setup() {.cdecl.} =
   discard global.setFps(60)
+  discard global.logNotice("hello Trussc!")
 
 proc update() {.cdecl.} =
   let r: float = global.getFrameRate()
@@ -27,5 +29,6 @@ proc draw() {.cdecl.} =
     100, 100)
 
 when isMainModule:
+  showConsole()
   var app = makeTcApp(setup=setup, update=update, draw=draw)
   app.run(800, 600)

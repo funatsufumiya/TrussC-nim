@@ -1,7 +1,11 @@
 import tcApp
+import consoleUtil
 
 # example state
 var frameCount = 0
+
+proc setup() {.cdecl.} =
+    echo "hello TrussC!"
 
 proc update() {.cdecl.} =
     inc frameCount
@@ -14,5 +18,6 @@ proc keyPressed(key: cint) {.cdecl.} =
     echo "key: ", $ckey, " (", $key, "), frameCount: ", $frameCount
 
 when isMainModule:
-    var app = makeTcApp(update=update, draw=draw, keyPressed=keyPressed)
+    showConsole()
+    var app = makeTcApp(setup=setup, update=update, draw=draw, keyPressed=keyPressed)
     app.run(800, 600)
