@@ -46,6 +46,7 @@ else:
 
 switch("path", "src")
 switch("passC", "-Iinclude")
+switch("passC", "-Ihap")
 
 include "addons.nims"
 

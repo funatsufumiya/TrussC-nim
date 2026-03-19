@@ -6,7 +6,7 @@ import tcx_addons
 
 {.emit: """
 #include "TrussC.h"
-#include "tcxHap.h"
+#include "tcxHapPlayer.h"
 
 using namespace trussc;
 using namespace tc;
