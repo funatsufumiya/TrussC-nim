@@ -40,8 +40,14 @@ proc keyPressed(key: cint) {.cdecl.} =
         discard global.sapp_request_quit()
 
 proc filesDropped(info: pointer) {.cdecl.} =
-    let files = cast[ptr CppVector[CppString]](info)
-    echo "files: ", $(files[])
+    let raw_files = cast[ptr CppVector[CppString]](info)[]
+
+    var files: seq[string] = @[]
+    for i in 0 ..< raw_files.len:
+        let f = raw_files[i]
+        files.add($f)
+
+    echo "dropped files: ", $(files)
 
 when isMainModule:
     showConsole() # this is necessary to see logs
