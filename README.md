@@ -118,7 +118,7 @@ tcxHap
 │       └── tcxHap.lib
 ```
 
-Now you can build them. If you have additional headers, put them into `addons/tcxXXX/src` or root `include` folder.
+Now you can build them. If you have (need) additional headers (such as `hap.h`), please put them into `addons/tcxXXX/src` or root `include` folder.
 
 ## TODO
 
