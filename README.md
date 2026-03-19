@@ -80,7 +80,7 @@ $ nim c -r examples/cpp_interop.nim
     ```txt
     tcxOsc
     ```
-- Copy tcxXXX folder into `addons/tcxXXX` (such as tcxOsc) from openFrameworks directory (or other github repository)
+- Copy tcxXXX folder into `addons/tcxXXX` (such as tcxOsc) from TrussC directory (or other github repository)
 - Then try `nim c -r examples\osc_test.nim`
     - You can debug addon parse log by  `-d:addonsDebug`, such as `nim c -d:addonsDebug -r examples\osc_test.nim`
 
