@@ -82,12 +82,43 @@ $ nim c -r examples/cpp_interop.nim
 - Then try `nim c -r examples\osc_test.nim`
     - You can debug addon parse log by  `-d:addonsDebug`, such as `nim c -d:addonsDebug -r examples\osc_test.nim`
 
-### NOTE: `import tcx_addons`
+### NOTE 1: `import tcx_addons`
 
 When you use ofx addons, you need `import tcx_addons` on nim side. This includes `generated/addon_dependencies.nim` on nim side, in order to compile required C++ files.
 
 See [`examples/osc_test.nim`](examples/osc_test.nim) for detail.
 
+### NOTE 2: prebuilt libs for CMakeLists.txt
+
+Some addons have `CMakeLists.txt` in it, but TrussC-nim can't treat CMake.
+
+In order to treat them, you can put `prebuilt/vs` or `prebuilt/osx` folder in `addons/tcxXXX`.
+
+For example `tcpHap`, you should first create emptyProject using `tcpHap` by projectGenerator.
+
+![docs/hap_project_generator.png](docs/hap_project_generator.png)
+
+And build it as release build on Visual Studio or Xcode.
+
+Then you can find `.lib` or `.a` on project folders. You can find them by command such as `fd -uu lib$` (using [fd-find command](https://github.com/sharkdp/fd)) in the project folder.
+
+```bash
+$ fd -uu lib$
+vs\_deps\snappy-build\Release\snappy.lib
+vs\addons\tcxHap\Release\tcxHap.lib
+```
+
+Put all of them into `prebuilt/vs` or `prebuilt/osx`. in this case:
+
+```
+tcxHap
+├── prebuilt
+│   └── vs
+│       ├── snappy.lib
+│       └── tcxHap.lib
+```
+
+Now you can build them. If you have additional headers, put them into `addons/tcxXXX/src` or root `include` folder.
 
 ## TODO
 
