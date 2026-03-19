@@ -27,5 +27,4 @@ $ nim c -r examples/hello.nim
 
 ## TODO
 
-- basic tests
 - support addons
