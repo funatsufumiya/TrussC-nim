@@ -1,6 +1,6 @@
 # TrussC-nim
 
-WIP
+TrussC nim integration
 
 ## Pre-requisites
 
