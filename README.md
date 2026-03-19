@@ -67,4 +67,5 @@ $ nim c -r examples/cpp_interop.nim
 
 ## TODO
 
-- support addons
+- addons
+- Linux support (etc)
