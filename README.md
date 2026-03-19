@@ -133,6 +133,16 @@ Now you can build them. If you have (need) additional headers (such as `hap.h`),
 
 (For tcxHap, I prepared [tcxHap.zip](https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/tcxHap.zip) having necessary prebuilt files for vs/osx.)
 
+## Screenshots
+
+### [imgui_test](examples/imgui_test.nim)
+
+![docs/imgui.png](docs/imgui.png)
+
+### [hap_test](examples/hap_test.nim)
+
+![docs/hap.png](docs/hap.png)
+
 ## TODO
 
 - Linux support (etc)
