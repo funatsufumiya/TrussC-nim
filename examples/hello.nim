@@ -18,6 +18,6 @@ proc keyPressed(key: cint) {.cdecl.} =
     echo "key: ", $ckey, " (", $key, "), frameCount: ", $frameCount
 
 when isMainModule:
-    showConsole()
+    showConsole() # this is necessary to see logs
     var app = makeTcApp(setup=setup, update=update, draw=draw, keyPressed=keyPressed)
     app.run(800, 600)

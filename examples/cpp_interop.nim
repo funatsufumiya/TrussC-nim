@@ -29,6 +29,6 @@ proc draw() {.cdecl.} =
     100, 100)
 
 when isMainModule:
-  showConsole()
+  showConsole() # this is necessary to see logs
   var app = makeTcApp(setup=setup, update=update, draw=draw)
   app.run(800, 600)
