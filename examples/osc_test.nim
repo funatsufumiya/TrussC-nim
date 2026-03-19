@@ -10,7 +10,6 @@ import tcx_addons
 
 using namespace trussc;
 using namespace tc;
-// using namespace tcx;
 """ .}
 
 defineCppType(OscSender, "OscSender", "tcxOsc.h")
