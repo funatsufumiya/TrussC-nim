@@ -43,7 +43,7 @@ proc keyPressed(key: cint) {.cdecl.} =
   elif key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
     discard global.sapp_request_quit()
   elif ckey == 'm' or ckey == 'M':
-        echo "total mem: ", getTotalMem()
+    echo "total mem: ", getTotalMem()
 
 when isMainModule:
   showConsole() # this is necessary to see logs
