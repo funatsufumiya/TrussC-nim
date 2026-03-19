@@ -127,6 +127,12 @@ proc scanAddonLibs(addonLibs: string, projectRootArg: string): bool =
           found = true
   return found
 
+proc prebuiltMissingNote(addonName: string, projectRootArg: string): string =
+  let nl = "\n"
+  let note = "[NOTE]"
+  let addonRel = joinPath("addons", addonName)
+  return fmt"{nl}{note} The addon '{addonRel}' contains a CMakeLists.txt.{nl}       TrussC-nim does not run CMake; {nl}       Please build this addon using TrussC and place the resulting prebuilt libraries {nl}       under the project's `prebuilt/<platform>` directory before retrying. See README.md for details.{nl}"
+
 proc selectAddonsFile*(projectRoot: string, mainNimRelPath: string): string =
   if mainNimRelPath.len == 0: return ""
   let candidate = mainNimRelPath & ".addons"
@@ -168,38 +174,40 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
     let hasCMake = fileExists(joinPath(addonPath, "CMakeLists.txt"))
 
     if hasCMake:
-      # CMake-based addon: prefer platform-specific prebuilt dirs
-      let libVs = joinPath(projectRootArg, "prebuilt", "vs")
-      let libOsx = joinPath(projectRootArg, "prebuilt", "osx")
+      # CMake-based addon: prefer platform-specific prebuilt dirs under the addon folder
+      let libVs = joinPath(addonPath, "prebuilt", "vs")
+      let libOsx = joinPath(addonPath, "prebuilt", "osx")
+      let libLinux = joinPath(addonPath, "prebuilt", "linux")
 
       let lname = n.toLowerAscii()
       var foundAny = false
+
+      let note = prebuiltMissingNote(n, projectRootArg)
 
       # Platform-specific scanning using compile-time branches
       when defined(windows):
         if not dirExists(libVs):
           let nl = "\n"
-          quit(fmt"[Error] required library directory not found: {libVs}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+          quit(fmt"[Error] required library directory not found: {libVs}{nl}Please provide prebuilt addon libraries before proceeding.{nl}{note}")
         let ok = scanPrebuiltDir(libVs, lname, projectRootArg)
         if ok: foundAny = true
 
       elif defined(macosx):
         if not dirExists(libOsx):
           let nl = "\n"
-          quit(fmt"[Error] required library directory not found: {libOsx}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+          quit(fmt"[Error] required library directory not found: {libOsx}{nl}Please provide prebuilt addon libraries before proceeding.{nl}{note}")
         let ok = scanPrebuiltDir(libOsx, lname, projectRootArg)
         if ok: foundAny = true
 
       elif defined(linux):
-        let libLinux = joinPath(projectRootArg, "prebuilt", "linux")
         if not dirExists(libLinux):
           let nl = "\n"
-          quit(fmt"[Error] required library directory not found: {libLinux}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+          quit(fmt"[Error] required library directory not found: {libLinux}{nl}Please provide prebuilt addon libraries before proceeding.{nl}{note}")
         if scanPrebuiltDir(libLinux, lname, projectRootArg): foundAny = true
 
       if not foundAny:
         let nl = "\n"
-        quit(fmt"[Error] prebuilt library for addon '{n}' not found in expected prebuilt directory for this platform.{nl}Please build or place the library and retry.{nl}")
+        quit(fmt"[Error] prebuilt library for addon '{n}' not found in expected prebuilt directory for this platform.{nl}Please build or place the library and retry.{nl}{note}")
 
       # Include headers only (do not collect .cpp)
       let srcDir = joinPath(addonPath, "src")
