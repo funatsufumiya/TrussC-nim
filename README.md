@@ -94,7 +94,7 @@ Some addons have `CMakeLists.txt` in it, but TrussC-nim can't treat CMake.
 
 In this case, in order to treat them on linker, you should put prebuilt files into `prebuilt/vs` (windows) or `prebuilt/osx` (mac) folder in `addons/tcxXXX`.
 
-For example `tcpHap`, you should first create emptyProject using `tcpHap` by projectGenerator.
+For example `tcpHap`, you should first create emptyProject using `tcpHap` by projectGenerator of original version of TrussC (not TrussC-nim).
 
 ![docs/hap_project_generator.png](docs/hap_project_generator.png)
 
