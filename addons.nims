@@ -66,6 +66,67 @@ proc addLink(path: string) =
   logAdd(fmt"passL: {path}")
   switch("passL", path)
 
+proc scanPrebuiltDir(dir: string, lname: string, projectRootArg: string): bool =
+  var found = false
+  if dir.len == 0 or not dirExists(dir): return found
+  for kind, p in walkDir(dir):
+    if kind == pcFile:
+      let low = p.toLowerAscii()
+      when defined(windows):
+        if low.endsWith(".lib") and low.contains(lname):
+          addLink(p)
+          found = true
+        elif low.endsWith(".dll") and low.contains(lname):
+          addLink(p)
+          copyFile(p, joinPath(projectRootArg, getFileName(p)))
+          found = true
+      elif defined(macosx):
+        if low.endsWith(".a") and low.contains(lname):
+          addLink(p)
+          found = true
+        elif low.endsWith(".dylib") and low.contains(lname):
+          addLink(p)
+          copyFile(p, joinPath(projectRootArg, getFileName(p)))
+          found = true
+      elif defined(linux):
+        if low.endsWith(".a") and low.contains(lname):
+          addLink(p)
+          found = true
+        elif low.endsWith(".so") and low.contains(lname):
+          addLink(p)
+          found = true
+      else:
+        if (low.endsWith(".lib") or low.endsWith(".a") or low.endsWith(".dll") or low.endsWith(".dylib") or low.endsWith(".so")) and low.contains(lname):
+          addLink(p)
+          found = true
+  return found
+
+proc scanAddonLibs(addonLibs: string, projectRootArg: string): bool =
+  var found = false
+  if addonLibs.len == 0 or not dirExists(addonLibs): return found
+  for kind, p in walkDir(addonLibs):
+    if kind == pcFile:
+      let low = p.toLowerAscii()
+      when defined(windows):
+        if low.endsWith(".lib") or low.endsWith(".dll"):
+          addLink(p)
+          if low.endsWith(".dll"): copyFile(p, joinPath(projectRootArg, getFileName(p)))
+          found = true
+      elif defined(macosx):
+        if low.endsWith(".a") or low.endsWith(".dylib"):
+          addLink(p)
+          if low.endsWith(".dylib"): copyFile(p, joinPath(projectRootArg, getFileName(p)))
+          found = true
+      elif defined(linux):
+        if low.endsWith(".a") or low.endsWith(".so"):
+          addLink(p)
+          found = true
+      else:
+        if low.endsWith(".lib") or low.endsWith(".a") or low.endsWith(".dll") or low.endsWith(".dylib") or low.endsWith(".so"):
+          addLink(p)
+          found = true
+  return found
+
 proc selectAddonsFile*(projectRoot: string, mainNimRelPath: string): string =
   if mainNimRelPath.len == 0: return ""
   let candidate = mainNimRelPath & ".addons"
@@ -107,46 +168,38 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
     let hasCMake = fileExists(joinPath(addonPath, "CMakeLists.txt"))
 
     if hasCMake:
-      # CMake-based addon: require prebuilt libs under projectRoot/lib/vs or lib/osx
-      let libVs = joinPath(projectRootArg, "lib", "vs")
-      let libOsx = joinPath(projectRootArg, "lib", "osx")
-      if not dirExists(libVs) and not dirExists(libOsx):
-        let nl = "\n"
-        quit(fmt"[Error] required library directories not found: {libVs} or {libOsx}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+      # CMake-based addon: prefer platform-specific prebuilt dirs
+      let libVs = joinPath(projectRootArg, "prebuilt", "vs")
+      let libOsx = joinPath(projectRootArg, "prebuilt", "osx")
 
       let lname = n.toLowerAscii()
       var foundAny = false
 
-      # search for .lib under lib/vs that match addon name
-      if dirExists(libVs):
-        for kind, p in walkDir(libVs):
-          if kind == pcFile:
-            let low = p.toLowerAscii()
-            if low.endsWith(".lib") and low.contains(lname):
-              addLink(p)
-              foundAny = true
-            if low.endsWith(".dll") and low.contains(lname):
-              addLink(p)
-              # copy to project root
-              copyFile(p, joinPath(projectRootArg, getFileName(p)))
-              foundAny = true
+      # Platform-specific scanning using compile-time branches
+      when defined(windows):
+        if not dirExists(libVs):
+          let nl = "\n"
+          quit(fmt"[Error] required library directory not found: {libVs}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+        let ok = scanPrebuiltDir(libVs, lname, projectRootArg)
+        if ok: foundAny = true
 
-      # search for .a / .dylib under lib/osx that match addon name
-      if dirExists(libOsx):
-        for kind, p in walkDir(libOsx):
-          if kind == pcFile:
-            let low = p.toLowerAscii()
-            if low.endsWith(".a") and low.contains(lname):
-              addLink(p)
-              foundAny = true
-            if low.endsWith(".dylib") and low.contains(lname):
-              addLink(p)
-              copyFile(p, joinPath(projectRootArg, getFileName(p)))
-              foundAny = true
+      elif defined(macosx):
+        if not dirExists(libOsx):
+          let nl = "\n"
+          quit(fmt"[Error] required library directory not found: {libOsx}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+        let ok = scanPrebuiltDir(libOsx, lname, projectRootArg)
+        if ok: foundAny = true
+
+      elif defined(linux):
+        let libLinux = joinPath(projectRootArg, "prebuilt", "linux")
+        if not dirExists(libLinux):
+          let nl = "\n"
+          quit(fmt"[Error] required library directory not found: {libLinux}{nl}Please provide prebuilt addon libraries before proceeding.{nl}")
+        if scanPrebuiltDir(libLinux, lname, projectRootArg): foundAny = true
 
       if not foundAny:
         let nl = "\n"
-        quit(fmt"[Error] prebuilt library for addon '{n}' not found under {libVs} or {libOsx}.{nl}Please build or place the library and retry.{nl}")
+        quit(fmt"[Error] prebuilt library for addon '{n}' not found in expected prebuilt directory for this platform.{nl}Please build or place the library and retry.{nl}")
 
       # Include headers only (do not collect .cpp)
       let srcDir = joinPath(addonPath, "src")
@@ -157,6 +210,12 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
           if dirExists(sd): addInclude(sd)
       let incl = joinPath(addonPath, "include")
       if dirExists(incl): addInclude(incl)
+      # Also accept prebuilt libraries placed inside the addon under "libs/" and filter by platform
+      let addonLibs = joinPath(addonPath, "libs")
+      if dirExists(addonLibs):
+        if scanAddonLibs(addonLibs, projectRootArg):
+          # note: we don't rely on the return value here beyond acceptance
+          discard
 
     else:
       # Non-CMake addon: include headers and collect cpp sources for compilation
@@ -182,6 +241,11 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
             discoveredCppSources.add(rel)
       let inc = joinPath(addonPath, "include")
       if dirExists(inc): addInclude(inc)
+      # Also accept prebuilt libraries placed inside the addon under "libs/" and filter by platform
+      let addonLibs = joinPath(addonPath, "libs")
+      if dirExists(addonLibs):
+        if scanAddonLibs(addonLibs, projectRootArg):
+          discard
 
   # emit generated Nim file with {.compile: ...} pragmas for discovered C/C++ sources
   if discoveredCppSources.len > 0:
