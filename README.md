@@ -88,7 +88,7 @@ $ nim c -r examples/cpp_interop.nim
 
 ### NOTE 1: `import tcx_addons`
 
-When you use ofx addons, you need `import tcx_addons` on nim side. This includes `generated/addon_dependencies.nim` on nim side, in order to compile required C++ files.
+When you use tcx addons, you need `import tcx_addons` on nim side. This includes `generated/addon_dependencies.nim` on nim side, in order to compile required C++ files.
 
 See [`examples/osc_test.nim`](examples/osc_test.nim) for detail.
 
