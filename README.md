@@ -105,9 +105,15 @@ And just build it (in release build mode) using Visual Studio or Xcode.
 Then you can find `.lib` or `.a` on project folders. You can find them by command such as `fd -uu lib$` (using [fd-find command](https://github.com/sharkdp/fd)) in the project folder.
 
 ```bash
+# windows vs (visual studio)
 $ fd -uu lib$
 vs\_deps\snappy-build\Release\snappy.lib
 vs\addons\tcxHap\Release\tcxHap.lib
+
+# mac xcode
+$ fd -uu \\.a$
+xcode/_deps/snappy-build/RelWithDebInfo/libsnappy.a
+xcode/addons/tcxHap/RelWithDebInfo/libtcxHap.a
 ```
 
 Put all of them into `prebuilt/vs` or `prebuilt/osx`. in this case:
@@ -115,9 +121,12 @@ Put all of them into `prebuilt/vs` or `prebuilt/osx`. in this case:
 ```
 tcxHap
 ├── prebuilt
-│   └── vs
-│       ├── snappy.lib
-│       └── tcxHap.lib
+│   ├── vs
+│   │   ├── snappy.lib
+│   │   └── tcxHap.lib
+│   └── osx
+│       ├── libsnappy.a
+│       └── libtcxHap.a
 ```
 
 Now you can build them. If you have (need) additional headers (such as `hap.h`), please put them into `addons/tcxXXX/src` or root `include` folder.
