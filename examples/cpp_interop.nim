@@ -9,7 +9,7 @@ using namespace trussc;
 using namespace tc;
 """.}
 
-# proc red {.importcpp: "tc::colors::red" .}
+proc red {.importcpp: "tc::colors::red" .}
 
 proc setup() {.cdecl.} =
   discard global.setFps(60)
@@ -20,7 +20,7 @@ proc update() {.cdecl.} =
   discard global.setWindowTitle(s)
 
 proc draw() {.cdecl.} =
-  discard global.setColor(1.0, 0.0, 0.0)
+  discard global.setColor(red)
   discard global.drawRect(
     global.getMouseX() - 50,
     global.getMouseY() - 50,
