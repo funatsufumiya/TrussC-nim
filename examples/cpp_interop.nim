@@ -2,7 +2,7 @@ import tcApp
 import std/strformat
 import nimline
 import consoleUtil
-import os
+import system
 
 {.emit: """
 #include "TrussC.h"

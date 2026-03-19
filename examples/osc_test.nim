@@ -3,7 +3,7 @@ import std/strformat
 import nimline
 import consoleUtil
 import tcx_addons
-import os
+import system
 
 {.emit: """
 #include "TrussC.h"
@@ -37,7 +37,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     echo "key: ", $ckey
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
         discard global.exitApp()
-        quit()
+        quit(0)
 
 when isMainModule:
     showConsole() # this is necessary to see logs
