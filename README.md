@@ -148,3 +148,4 @@ Now you can build them. If you have (need) additional headers (such as `hap.h`),
 ## TODO
 
 - Linux support (etc)
+- Test more addons
