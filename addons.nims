@@ -100,7 +100,9 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
 
   for n in names:
     let addonPath = joinPath(addonsDir, n)
-    if not dirExists(addonPath): continue
+    if not dirExists(addonPath):
+      let nl = "\n"
+      quit(fmt"[Error] addon not found: {addonPath}{nl}Please ensure the addon '{n}' exists under {addonsDir}{nl}")
 
     let hasCMake = fileExists(joinPath(addonPath, "CMakeLists.txt"))
 
