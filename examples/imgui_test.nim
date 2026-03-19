@@ -3,6 +3,7 @@ import std/strformat
 import nimline
 import consoleUtil
 import system
+import os
 
 {.emit: """
 #include "TrussC.h"
@@ -42,6 +43,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     discard global.toggleFullscreen()
   elif key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
     discard global.exitApp()
+    quit()
   elif ckey == 'm' or ckey == 'M':
     echo "total mem: ", getTotalMem()
 

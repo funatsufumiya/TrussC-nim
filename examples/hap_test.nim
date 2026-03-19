@@ -6,6 +6,7 @@ import std/strformat
 import std/strutils
 import nimline
 import cppstl
+import os
 
 {.emit: """
 #include "TrussC.h"
@@ -59,6 +60,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     echo "key: ", $ckey
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
         discard global.exitApp()
+        quit()
 
 proc filesDropped(info: pointer) {.cdecl.} =
     let raw_files = cast[ptr CppVector[CppString]](info)[]

@@ -5,6 +5,7 @@ import std/strformat
 import std/strutils
 import nimline
 import cppstl
+import os
 
 {.emit: """
 #include "TrussC.h"
@@ -29,6 +30,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     echo "key: ", $ckey
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
         discard global.exitApp()
+        quit()
 
 proc wrapText(s: string, width: int): string =
     if width <= 0:

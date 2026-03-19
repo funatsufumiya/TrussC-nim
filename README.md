@@ -12,6 +12,7 @@ import tcApp
 import std/strformat
 import nimline
 import consoleUtil
+import os
 
 {.emit: """
 #include "TrussC.h"
@@ -44,6 +45,7 @@ proc keyPressed(key: cint) {.cdecl.} =
     discard global.toggleFullscreen()
   elif key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
     discard global.exitApp()
+    quit()
 
 when isMainModule:
   showConsole() # this is necessary to see logs
