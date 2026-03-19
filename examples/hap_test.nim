@@ -37,7 +37,14 @@ proc keyPressed(key: cint) {.cdecl.} =
     if key == global.KEY_ESCAPE or ckey == 'q' or ckey == 'Q':
         discard global.sapp_request_quit()
 
+proc filesDropped(info: pointer) {.cdecl.} =
+    let address: int = cast[int](info)
+    echo "info: ", address
+
 when isMainModule:
     showConsole() # this is necessary to see logs
-    var app = makeTcApp(setup=setup, update=update, draw=draw, keyPressed=keyPressed)
+    var app = makeTcApp(
+        setup=setup, update=update, draw=draw,
+        keyPressed=keyPressed,
+        filesDropped=filesDropped)
     app.run(800, 600)
