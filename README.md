@@ -1,6 +1,6 @@
 # TrussC-nim
 
-![docs/trussc-nim-logo.png](docs/trussc-nim-logo.png)
+![docs/trussc-nim-logo2.png](docs/trussc-nim-logo2.png)
 
 [TrussC](https://github.com/TrussC-org/TrussC) nim integration
 
