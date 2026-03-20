@@ -138,7 +138,7 @@ Now you can build them. If you have (need) additional headers (such as `hap.h`),
 ### NOTE 3: config.txt
 
 Each `addons/tcxXXX` can have `config.txt`.
-This is tiny DSL of feels like partial `config.nims`
+This is tiny DSL of feels like partial `config.nims` (but not real nimscript language, just original tiny parser.)
 
 ```nim
 when defined(windows):
