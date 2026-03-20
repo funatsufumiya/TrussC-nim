@@ -135,6 +135,22 @@ Now you can build them. If you have (need) additional headers (such as `hap.h`),
 
 (For example `tcxHap`, I prepared [tcxHap.zip](https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/tcxHap.zip) having necessary prebuilt files for vs/osx.)
 
+### NOTE 3: config.txt
+
+Each `addons/tcxXXX` can have `config.txt`.
+This is tiny DSL of feels like partial `config.nims`
+
+```nim
+when defined(windows):
+    switch("passL", fmt"{addonRoot}\lib\mylib.lib")
+elif defined(macosx):
+    switch("passL", "-framework Cocoa")
+
+# this is comment
+# and debug
+echo fmt"debug: addonRoot = {addonRoot}"
+```
+
 ## Screenshots
 
 ### [imgui_test](examples/imgui_test.nim)

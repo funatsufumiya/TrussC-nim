@@ -1,6 +1,7 @@
 import std/os
 import std/strutils
 import std/strformat
+include "config_parser.nims"
 
 when defined(addonsDebug):
   const debugAddons = true
@@ -170,6 +171,16 @@ proc processAddons*(addonsMakePath: string, addonsDir: string, projectRootArg: s
     if not dirExists(addonPath):
       let nl = "\n"
       quit(fmt"[Error] addon not found: {addonPath}{nl}Please ensure the addon '{n}' exists under {addonsDir}{nl}")
+
+    # parse a simple config.txt if provided by addon (restricted DSL)
+    let addonTxt = joinPath(addonPath, "config.txt")
+    if fileExists(addonTxt):
+      let addonRoot = addonPath
+      let addonName = n
+      let projectRoot = parentDir(system.currentSourcePath)
+      when defined(addonsDebug):
+        echo(fmt"[addon {addonName}] included: {addonTxt}")
+      parseConfigTxt(addonTxt, addonRoot, projectRoot, addonName)
 
     let hasCMake = fileExists(joinPath(addonPath, "CMakeLists.txt"))
 
