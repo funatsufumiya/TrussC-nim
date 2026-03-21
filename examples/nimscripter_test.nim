@@ -68,12 +68,6 @@ proc update() {.cdecl.} =
 proc draw() {.cdecl.} =
   intr.invoke(draw)
 
-  # discard global.setColor(red)
-  # discard global.drawRect(
-  #   global.getMouseX() - 50,
-  #   global.getMouseY() - 50,
-  #   100, 100)
-
 proc keyPressed(key: cint) {.cdecl.} =
   let ckey = cast[char](key)
   if ckey == 'f' or ckey == 'F':
