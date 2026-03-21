@@ -165,5 +165,5 @@ echo fmt"debug: addonRoot = {addonRoot}"
 
 ## TODO
 
-- Linux support (etc)
+- Linux support (and others)
 - Test more addons
