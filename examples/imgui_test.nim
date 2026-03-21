@@ -11,11 +11,6 @@ using namespace trussc;
 using namespace tc;
 """.}
 
-proc ImGui_Begin(s: cstring) {.importcpp: "ImGui::Begin(@)" .}
-proc ImGui_End() {.importcpp: "ImGui::End()" .}
-proc ImGui_Text(s: cstring) {.importcpp: "ImGui::Text(@)" .}
-proc ImGui_SliderFloat(s: cstring, f: ptr[cfloat], min: float, max: float) {.importcpp: "ImGui::SliderFloat(@)" .}
-
 proc setup() {.cdecl.} =
   discard global.setFps(60)
   discard global.imguiSetup();
@@ -30,10 +25,10 @@ var float_val: cfloat = 1.0
 proc draw() {.cdecl.} =
   discard global.resetStyle()
   discard global.imguiBegin();
-  ImGui_Begin("test")
-  ImGui_Text("this is test!!")
-  ImGui_SliderFloat("slider", float_val.addr, 0, 1)
-  ImGui_End()
+  discard invokeFunction("ImGui::Begin","test")
+  discard invokeFunction("ImGui::Text", "this is test!!")
+  discard invokeFunction("ImGui::SliderFloat", "slider", float_val.addr, 0, 1)
+  discard invokeFunction("ImGui::End")
   discard global.imguiEnd();
 
 proc keyPressed(key: cint) {.cdecl.} =
