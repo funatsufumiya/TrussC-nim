@@ -163,6 +163,10 @@ echo fmt"debug: addonRoot = {addonRoot}"
 
 ![docs/hap.png](docs/hap.png)
 
+### [nimscripter_test](examples/nimscripter_test.nim)
+
+![docs/script.png](docs/script.png)
+
 ## TODO
 
 - Linux support (and others)
