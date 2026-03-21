@@ -169,6 +169,12 @@ Need `nimble install nimscripter`
 
 ![docs/script.png](docs/script.png)
 
+### [nimscripter_reload_test](examples/nimscripter_reload_test.nim)
+
+Need `nimble install nimscripter`
+
+![docs/reload.png](docs/reload.png)
+
 ## TODO
 
 - Linux support (and others)
