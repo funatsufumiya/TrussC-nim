@@ -33,12 +33,17 @@ elif defined(macosx):
 switch("backend", "cpp")
 
 when defined(windows):
-  # switch("cc", "vcc")
-  switch("cc", "clang_cl")
+  const use_vcc = false
+  if use_vcc:
+    switch("cc", "vcc")
+  else:
+    switch("cc", "clang_cl")
   switch("passC", "/INCREMENTAL")
   switch("passC", "/std:c++17")
   switch("passC", "/utf-8")
   switch("passC", "/MD")
+  if use_vcc:
+    switch("passC", "/MP")
   switch("passC", "/DWIN32_LEAN_AND_MEAN")
   switch("passC", "/DFAR=")
   switch("passC", "/DNOMINMAX")
