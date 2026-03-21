@@ -165,6 +165,8 @@ echo fmt"debug: addonRoot = {addonRoot}"
 
 ### [nimscripter_test](examples/nimscripter_test.nim)
 
+Need `nimble install nimscripter`
+
 ![docs/script.png](docs/script.png)
 
 ## TODO
