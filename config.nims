@@ -71,6 +71,7 @@ when defined(windows):
   switch("passL", "lib\\vs\\x64\\TrussC.lib")
 elif defined(macosx):
   switch("passL", "lib/osx/libTrussC.a")
+  switch("passL", "include/hash_memory_fix_workaround.cpp")
   switch("passL","-framework Metal")
   switch("passL","-framework MetalKit")
   switch("passL","-framework Cocoa")
