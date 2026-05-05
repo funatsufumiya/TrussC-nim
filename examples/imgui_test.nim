@@ -6,9 +6,11 @@ import system
 
 {.emit: """
 #include "TrussC.h"
+#include "tcxImGui.h"
 
 using namespace trussc;
 using namespace tc;
+using namespace tcx;
 """.}
 
 proc setup() {.cdecl.} =
