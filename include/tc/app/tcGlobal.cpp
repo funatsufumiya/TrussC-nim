@@ -1,0 +1,462 @@
+// =============================================================================
+// tcGlobal.cpp - TrussC Global Functions Implementation
+// Large functions moved from TrussC.h for better compile times
+// =============================================================================
+
+#include <TrussC.h>
+
+namespace trussc {
+
+// ---------------------------------------------------------------------------
+// Initialization (setup)
+// ---------------------------------------------------------------------------
+void setup() {
+    // Initialize sokol_gfx (with memory tracking allocator)
+    sg_desc sgdesc = {};
+    sgdesc.environment = sglue_environment();
+    sgdesc.logger.func = slog_func;
+    sgdesc.pipeline_pool_size = 256;  // default 64 is too small when FBOs are used
+    sgdesc.image_pool_size = 10000;
+    sgdesc.view_pool_size = 10000;
+    sgdesc.sampler_pool_size = 10000;
+    sgdesc.allocator.alloc_fn = smemtrack_alloc;
+    sgdesc.allocator.free_fn = smemtrack_free;
+    sg_setup(&sgdesc);
+
+    // Initialize sokol_gl (with memory tracking allocator)
+    sgl_desc_t sgldesc = {};
+    sgldesc.logger.func = slog_func;
+    sgldesc.pipeline_pool_size = 256;
+    sgldesc.max_vertices = internal::sglMaxVertices;
+    sgldesc.max_commands = internal::sglMaxCommands;
+    sgldesc.allocator.alloc_fn = smemtrack_alloc;
+    sgldesc.allocator.free_fn = smemtrack_free;
+    sgl_setup(&sgldesc);
+
+    // Initialize bitmap font texture
+    if (!internal::fontInitialized) {
+        // Generate texture atlas pixel data
+        unsigned char* pixels = bitmapfont::generateAtlasPixels();
+
+        // Create texture
+        sg_image_desc img_desc = {};
+        img_desc.width = bitmapfont::ATLAS_WIDTH;
+        img_desc.height = bitmapfont::ATLAS_HEIGHT;
+        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.data.mip_levels[0].ptr = pixels;
+        img_desc.data.mip_levels[0].size = bitmapfont::ATLAS_WIDTH * bitmapfont::ATLAS_HEIGHT * 4;
+        internal::fontTexture = sg_make_image(&img_desc);
+
+        // Create texture view
+        sg_view_desc view_desc = {};
+        view_desc.texture.image = internal::fontTexture;
+        internal::fontView = sg_make_view(&view_desc);
+
+        // Create sampler (nearest neighbor, pixel perfect)
+        sg_sampler_desc smp_desc = {};
+        smp_desc.min_filter = SG_FILTER_NEAREST;
+        smp_desc.mag_filter = SG_FILTER_NEAREST;
+        smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        internal::fontSampler = sg_make_sampler(&smp_desc);
+
+        // Create pipeline for alpha blending
+        // RGB: standard alpha blend
+        // Alpha: overwrite (to prevent FBO from becoming semi-transparent when drawing to FBO)
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
+        internal::fontPipeline = sgl_make_pipeline(&pip_desc);
+
+        delete[] pixels;
+        internal::fontInitialized = true;
+    }
+
+    // Create pipeline for 3D drawing (depth test + alpha blend)
+    if (!internal::pipeline3dInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.cull_mode = SG_CULLMODE_NONE;  // No culling
+        pip_desc.depth.write_enabled = true;
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+        // Enable alpha blending
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        internal::pipeline3d = sgl_make_pipeline(&pip_desc);
+        internal::pipeline3dInitialized = true;
+    }
+
+    // Create blend mode pipelines
+    // Alpha channel is additive in all modes (does not reduce existing alpha)
+    if (!internal::blendPipelinesInitialized) {
+        // Alpha - normal alpha blending
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = true;
+            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            internal::blendPipelines[static_cast<int>(BlendMode::Alpha)] = sgl_make_pipeline(&pip_desc);
+        }
+        // Add - additive blending
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = true;
+            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            internal::blendPipelines[static_cast<int>(BlendMode::Add)] = sgl_make_pipeline(&pip_desc);
+        }
+        // Multiply - multiply blending
+        // Pure multiplication: result = src × dst
+        // Semi-transparency expressed by color darkness (assumes srcAlpha is premultiplied into RGB)
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = true;
+            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
+            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
+            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            internal::blendPipelines[static_cast<int>(BlendMode::Multiply)] = sgl_make_pipeline(&pip_desc);
+        }
+        // Screen - screen blending
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = true;
+            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            internal::blendPipelines[static_cast<int>(BlendMode::Screen)] = sgl_make_pipeline(&pip_desc);
+        }
+        // Subtract - subtractive blending
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = true;
+            pip_desc.colors[0].blend.op_rgb = SG_BLENDOP_REVERSE_SUBTRACT;
+            pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;  // Alpha remains additive
+            pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            internal::blendPipelines[static_cast<int>(BlendMode::Subtract)] = sgl_make_pipeline(&pip_desc);
+        }
+        // Disabled - no blending (overwrite)
+        {
+            sg_pipeline_desc pip_desc = {};
+            pip_desc.colors[0].blend.enabled = false;
+            internal::blendPipelines[static_cast<int>(BlendMode::Disabled)] = sgl_make_pipeline(&pip_desc);
+        }
+
+        internal::blendPipelinesInitialized = true;
+        internal::currentBlendMode = BlendMode::Alpha;
+    }
+
+    // Premultiplied alpha blend pipeline (for compositing FBO textures to screen)
+    if (!internal::premultipliedBlendPipelineInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        internal::premultipliedBlendPipeline = sgl_make_pipeline(&pip_desc);
+        internal::premultipliedBlendPipelineInitialized = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup (shutdown)
+// ---------------------------------------------------------------------------
+void cleanup() {
+    // Release premultiplied blend pipeline
+    if (internal::premultipliedBlendPipelineInitialized) {
+        sgl_destroy_pipeline(internal::premultipliedBlendPipeline);
+        internal::premultipliedBlendPipelineInitialized = false;
+    }
+    // Release blend mode pipelines
+    if (internal::blendPipelinesInitialized) {
+        for (int i = 0; i < 6; i++) {
+            sgl_destroy_pipeline(internal::blendPipelines[i]);
+        }
+        internal::blendPipelinesInitialized = false;
+    }
+    // Release 3D pipeline
+    if (internal::pipeline3dInitialized) {
+        sgl_destroy_pipeline(internal::pipeline3d);
+        internal::pipeline3dInitialized = false;
+    }
+    // Release font resources
+    if (internal::fontInitialized) {
+        sgl_destroy_pipeline(internal::fontPipeline);
+        sg_destroy_sampler(internal::fontSampler);
+        sg_destroy_view(internal::fontView);
+        sg_destroy_image(internal::fontTexture);
+        internal::fontInitialized = false;
+    }
+    sgl_shutdown();
+    sg_shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Resize sokol_gl buffers (called when vertex/command overflow detected)
+// Destroys and recreates sgl only — sg resources (textures, etc.) survive.
+// ---------------------------------------------------------------------------
+namespace internal {
+void resizeSgl(int newMaxVertices, int newMaxCommands) {
+    logNotice("sokol_gl") << "Resizing: vertices " << sglMaxVertices
+        << " -> " << newMaxVertices << ", commands " << sglMaxCommands
+        << " -> " << newMaxCommands;
+
+    // 1. Destroy all sgl pipelines (they become invalid after sgl_shutdown)
+    if (premultipliedBlendPipelineInitialized) {
+        sgl_destroy_pipeline(premultipliedBlendPipeline);
+    }
+    if (blendPipelinesInitialized) {
+        for (int i = 0; i < 6; i++) {
+            sgl_destroy_pipeline(blendPipelines[i]);
+        }
+    }
+    if (pipeline3dInitialized) {
+        sgl_destroy_pipeline(pipeline3d);
+    }
+    if (fontInitialized) {
+        sgl_destroy_pipeline(fontPipeline);
+        // Note: font texture/sampler/view are sg resources — they survive sgl_shutdown
+    }
+
+    // 2. Shutdown and re-init sokol_gl with larger buffers
+    sgl_shutdown();
+
+    sglMaxVertices = newMaxVertices;
+    sglMaxCommands = newMaxCommands;
+
+    sgl_desc_t sgldesc = {};
+    sgldesc.logger.func = slog_func;
+    sgldesc.pipeline_pool_size = 256;
+    sgldesc.max_vertices = newMaxVertices;
+    sgldesc.max_commands = newMaxCommands;
+    sgldesc.allocator.alloc_fn = smemtrack_alloc;
+    sgldesc.allocator.free_fn = smemtrack_free;
+    sgl_setup(&sgldesc);
+
+    // 3. Recreate all sgl pipelines
+    if (fontInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ZERO;
+        fontPipeline = sgl_make_pipeline(&pip_desc);
+    }
+
+    if (pipeline3dInitialized) {
+        sg_pipeline_desc pip_desc = {};
+        pip_desc.cull_mode = SG_CULLMODE_NONE;
+        pip_desc.depth.write_enabled = true;
+        pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+        pip_desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+        pip_desc.colors[0].blend.enabled = true;
+        pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+        pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        pipeline3d = sgl_make_pipeline(&pip_desc);
+    }
+
+    if (blendPipelinesInitialized) {
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = true;
+            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            blendPipelines[static_cast<int>(BlendMode::Alpha)] = sgl_make_pipeline(&p);
+        }
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = true;
+            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            blendPipelines[static_cast<int>(BlendMode::Add)] = sgl_make_pipeline(&p);
+        }
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = true;
+            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_DST_COLOR;
+            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ZERO;
+            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            blendPipelines[static_cast<int>(BlendMode::Multiply)] = sgl_make_pipeline(&p);
+        }
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = true;
+            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            blendPipelines[static_cast<int>(BlendMode::Screen)] = sgl_make_pipeline(&p);
+        }
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = true;
+            p.colors[0].blend.op_rgb = SG_BLENDOP_REVERSE_SUBTRACT;
+            p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.op_alpha = SG_BLENDOP_ADD;
+            p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+            blendPipelines[static_cast<int>(BlendMode::Subtract)] = sgl_make_pipeline(&p);
+        }
+        {
+            sg_pipeline_desc p = {};
+            p.colors[0].blend.enabled = false;
+            blendPipelines[static_cast<int>(BlendMode::Disabled)] = sgl_make_pipeline(&p);
+        }
+        currentBlendMode = BlendMode::Alpha;
+    }
+
+    if (premultipliedBlendPipelineInitialized) {
+        sg_pipeline_desc p = {};
+        p.colors[0].blend.enabled = true;
+        p.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+        p.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        p.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+        p.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        premultipliedBlendPipeline = sgl_make_pipeline(&p);
+    }
+
+    sglPendingResize = 0;
+}
+} // namespace internal
+
+// ---------------------------------------------------------------------------
+// Clear screen (RGB float: 0.0 ~ 1.0)
+// Works correctly in FBO or during swapchain pass (oF compatible)
+// ---------------------------------------------------------------------------
+void clear(float r, float g, float b, float a /* = 1.0f */) {
+    // Skip in headless mode (no graphics context)
+    if (headless::isActive()) return;
+
+    if (internal::inFboPass && internal::fboClearColorFunc) {
+        // During FBO pass, call FBO's clearColor() to restart pass
+        internal::fboClearColorFunc(r, g, b, a);
+    } else if (internal::inSwapchainPass) {
+        // During swapchain pass
+        BlendMode prevBlendMode = internal::currentBlendMode;
+
+        sgl_push_matrix();
+        sgl_matrix_mode_projection();
+        sgl_push_matrix();
+
+        sgl_load_identity();
+        sgl_ortho(-1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f);
+        sgl_matrix_mode_modelview();
+        sgl_load_identity();
+
+        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(BlendMode::Disabled)]);
+        sgl_disable_texture();
+        sgl_begin_quads();
+        sgl_c4f(r, g, b, a);
+        sgl_v2f(-1.0f, -1.0f);
+        sgl_v2f( 1.0f, -1.0f);
+        sgl_v2f( 1.0f,  1.0f);
+        sgl_v2f(-1.0f,  1.0f);
+        sgl_end();
+
+        sgl_matrix_mode_projection();
+        sgl_pop_matrix();
+        sgl_matrix_mode_modelview();
+        sgl_pop_matrix();
+
+        sgl_load_pipeline(internal::blendPipelines[static_cast<int>(prevBlendMode)]);
+    } else {
+        // Outside pass: defer swapchain pass start to present().
+        // Save clear color — the pass will start in present() with this value.
+        // sgl commands accumulate without an active pass, so FBOs can render
+        // in their own passes without interrupting the swapchain pass.
+        internal::swapchainClearValue = { r, g, b, a };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
+// ---------------------------------------------------------------------------
+void ensureSwapchainPass() {
+    if (!internal::inSwapchainPass && !internal::inFboPass) {
+        sg_pass pass = {};
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+        pass.action.depth.clear_value = 1.0f;
+        pass.swapchain = sglue_swapchain();
+        sg_begin_pass(&pass);
+        internal::inSwapchainPass = true;
+    }
+}
+
+void present() {
+    if (headless::isActive()) return;
+
+    ensureSwapchainPass();
+
+    flushDeferredShaderDraws();
+
+    events().onRender.notify();
+
+    sgl_error_t err = sgl_error();
+    if (err.vertices_full || err.commands_full) {
+        int newVerts = internal::sglMaxVertices * 4;
+        int newCmds = internal::sglMaxCommands * 4;
+        if (newVerts > internal::sglPendingResize) {
+            internal::sglPendingResize = newVerts;
+            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
+                << internal::sglMaxVertices << " vertices, "
+                << internal::sglMaxCommands << " commands). "
+                << "Will resize to " << newVerts << " next frame.";
+        }
+    }
+
+    sg_end_pass();
+    internal::inSwapchainPass = false;
+    sg_commit();
+}
+
+bool isInSwapchainPass() {
+    return internal::inSwapchainPass;
+}
+
+void suspendSwapchainPass() {
+    if (internal::inSwapchainPass) {
+        sg_end_pass();
+        internal::inSwapchainPass = false;
+    }
+}
+
+void resumeSwapchainPass() {
+    if (!internal::inSwapchainPass) {
+        sg_pass pass = {};
+        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        pass.action.colors[0].clear_value = internal::swapchainClearValue;
+        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+        pass.action.depth.clear_value = 1.0f;
+        pass.swapchain = sglue_swapchain();
+        sg_begin_pass(&pass);
+        internal::inSwapchainPass = true;
+    }
+}
+
+} // namespace trussc

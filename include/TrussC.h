@@ -18,10 +18,7 @@
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"
-
-// Dear ImGui + sokol_imgui
-#include "imgui/imgui.h"
-#include "sokol/util/sokol_imgui.h"
+#include "sokol/util/sokol_memtrack.h"
 
 // Standard libraries
 #include <cstdint>
@@ -40,14 +37,6 @@
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #elif defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifdef FAR
-#undef FAR
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <psapi.h>
 #endif
@@ -78,6 +67,12 @@
 
 // TrussC platform-specific features
 #include "tcPlatform.h"
+
+// TrussC graphics backend detection (runtime query of sokol_gfx backend)
+#include "tc/graphics/tcBackend.h"
+
+// TrussC build info (populated by trussc_app() at CMake configure time)
+#include "tcBuildInfo.h"
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
@@ -169,8 +164,6 @@ namespace internal {
     inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f);
     inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
 
-    // ImGui integration
-    inline bool imguiEnabled = false;
 
     // Blend mode pipelines
     inline sgl_pipeline blendPipelines[6] = {};
@@ -271,8 +264,28 @@ namespace internal {
     inline int mouseButton = -1;  // Currently pressed button (-1 = none)
     inline bool mousePressed = false;
 
+    // Touch-as-mouse mapping
+    // Mobile (Android/iOS): default ON — existing mouse-based code works on touch screens.
+    // Desktop/Web: default OFF — touch and mouse are separate.
+    // Override with setTouchAsMouse(true/false) in setup().
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    inline bool touchAsMouse = true;
+#else
+    inline bool touchAsMouse = false;
+#endif
+
+    // Touch event listeners (must persist to keep subscriptions alive)
+    inline EventListener touchPressedListener;
+    inline EventListener touchMovedListener;
+    inline EventListener touchReleasedListener;
+
     // Keyboard state
     inline std::unordered_set<int> keysPressed;
+
+    // Delta time (actual elapsed time since last update call)
+    inline double updateDeltaTime = 0.0;
+    inline std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
+    inline bool lastUpdateCallTimeInitialized = false;
 
     // Frame rate measurement (10-frame moving average)
     inline double frameTimeBuffer[10] = {};
@@ -289,8 +302,6 @@ namespace internal {
     // Pass state (for suspending swapchain pass for FBO)
     inline bool inSwapchainPass = false;
 
-    // ImGui deferred render flag (set by imguiEnd, consumed by present)
-    inline bool imguiRenderPending = false;
     // Saved clear color for resume after FBO suspend (set by clear())
     inline sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
 
@@ -304,6 +315,12 @@ namespace internal {
 
     // Current active FBO pointer (used from clearColor)
     inline void* currentFbo = nullptr;
+
+    // Color pixel format of the current FBO pass (for PBR pipeline format matching)
+    inline sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
+
+    // MSAAサンプルカウント（FBOパス中のPBRパイプライン用）
+    inline int currentFboSampleCount = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +333,7 @@ void setup();
 
 // Shutdown sokol_gfx + sokol_gl (call in cleanup callback)
 void cleanup();
+
 
 // ---------------------------------------------------------------------------
 // Frame control
@@ -360,6 +378,11 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
+// Clear screen (transparent black)
+inline void clear() {
+    clear(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
 // Clear screen (grayscale)
 inline void clear(float gray, float a = 1.0f) {
     clear(gray, gray, gray, a);
@@ -373,84 +396,24 @@ inline void clear(const Color& c) {
 // Forward declaration (implemented in tcShader.h after Shader class)
 void flushDeferredShaderDraws();
 
+// パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じグローバル状態を参照するため）
+// 実装は tc/app/tcGlobal.cpp
+
+// Ensure swapchain pass is active (starts if needed)
+// Safe to call multiple times — only starts once.
+void ensureSwapchainPass();
+
 // End pass and commit (call at end of draw)
-inline void present() {
-    // Skip in headless mode (no graphics context)
-    if (headless::isActive()) return;
-
-    // Start swapchain pass now (deferred from clear()).
-    // All sgl commands recorded during draw() will be submitted in this single pass.
-    if (!internal::inSwapchainPass) {
-        sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::swapchainClearValue;
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-        pass.swapchain = sglue_swapchain();
-        sg_begin_pass(&pass);
-        internal::inSwapchainPass = true;
-    }
-
-    // Flush sokol_gl layers and deferred shader draws
-    flushDeferredShaderDraws();
-
-    // Render ImGui on top of all sokol_gl content (deferred from imguiEnd)
-    if (internal::imguiRenderPending) {
-        simgui_render();
-        internal::imguiRenderPending = false;
-    }
-
-    // Check for vertex buffer overflow before sg_commit resets errors
-    sgl_error_t err = sgl_error();
-    if (err.vertices_full || err.commands_full) {
-        // Schedule resize for next frame (4x to minimize repeated resizes)
-        int newVerts = internal::sglMaxVertices * 4;
-        int newCmds = internal::sglMaxCommands * 4;
-        if (newVerts > internal::sglPendingResize) {
-            internal::sglPendingResize = newVerts;
-            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << internal::sglMaxVertices << " vertices, "
-                << internal::sglMaxCommands << " commands). "
-                << "Will resize to " << newVerts << " next frame.";
-        }
-    }
-
-    sg_end_pass();
-    internal::inSwapchainPass = false;
-    sg_commit();
-}
+void present();
 
 // Get swapchain pass state (for FBO)
-inline bool isInSwapchainPass() {
-    return internal::inSwapchainPass;
-}
+bool isInSwapchainPass();
 
 // Suspend swapchain pass (for FBO begin/end during draw)
-// The pass is simply ended. All sgl commands (pre- and post-FBO) remain in the
-// command buffer and will be drawn together by present() after resume.
-inline void suspendSwapchainPass() {
-    if (internal::inSwapchainPass) {
-        sg_end_pass();
-        internal::inSwapchainPass = false;
-    }
-}
+void suspendSwapchainPass();
 
 // Resume swapchain pass (for FBO)
-// Start a fresh pass with CLEAR action. present() → sgl_draw_layer() will
-// redraw ALL sgl commands (including pre-suspend ones), so no content is lost.
-// This avoids LOADACTION_LOAD on Metal swapchain drawables which can flicker.
-inline void resumeSwapchainPass() {
-    if (!internal::inSwapchainPass) {
-        sg_pass pass = {};
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = internal::swapchainClearValue;
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-        pass.swapchain = sglue_swapchain();
-        sg_begin_pass(&pass);
-        internal::inSwapchainPass = true;
-    }
-}
+void resumeSwapchainPass();
 
 // ---------------------------------------------------------------------------
 // Color settings (delegated to RenderContext)
@@ -1450,10 +1413,10 @@ inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
-        platform::setWindowSize(static_cast<int>(width / scale), static_cast<int>(height / scale));
+        setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
     } else {
         // Logical coordinate mode: as is
-        platform::setWindowSize(width, height);
+        setWindowSizeLogical(width, height);
     }
 }
 
@@ -1472,6 +1435,32 @@ inline bool isFullscreen() {
 // Toggle fullscreen
 inline void toggleFullscreen() {
     sapp_toggle_fullscreen();
+}
+
+// ---------------------------------------------------------------------------
+// Orientation control (iOS only, no-op on other platforms)
+// ---------------------------------------------------------------------------
+enum class Orientation : uint32_t {
+    Portrait            = (1 << 1),  // UIInterfaceOrientationMaskPortrait
+    PortraitUpsideDown  = (1 << 2),  // UIInterfaceOrientationMaskPortraitUpsideDown
+    LandscapeLeft       = (1 << 4),  // UIInterfaceOrientationMaskLandscapeLeft
+    LandscapeRight      = (1 << 3),  // UIInterfaceOrientationMaskLandscapeRight
+    Landscape           = LandscapeLeft | LandscapeRight,
+    All                 = Portrait | PortraitUpsideDown | LandscapeLeft | LandscapeRight,
+    AllButUpsideDown    = Portrait | LandscapeLeft | LandscapeRight,
+};
+
+inline Orientation operator|(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline Orientation operator&(Orientation a, Orientation b) {
+    return static_cast<Orientation>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+
+// Set supported orientations (iOS only)
+inline void setOrientation(Orientation mask) {
+    sapp_ios_set_supported_orientations(static_cast<uint32_t>(mask));
 }
 
 // ---------------------------------------------------------------------------
@@ -1536,13 +1525,14 @@ inline uint64_t getFrameCount() {
 }
 
 inline double getDeltaTime() {
-    return sapp_frame_duration();
+    return internal::updateDeltaTime;
 }
 
-// Get frame rate (10-frame moving average)
+// Get frame rate (10-frame moving average, based on update delta time)
 inline double getFrameRate() {
-    // Add current frame time to buffer
-    double dt = sapp_frame_duration();
+    // Add current update delta time to buffer
+    double dt = internal::updateDeltaTime;
+    if (dt <= 0.0) return 0.0;
     internal::frameTimeBuffer[internal::frameTimeIndex] = dt;
     internal::frameTimeIndex = (internal::frameTimeIndex + 1) % 10;
     if (internal::frameTimeIndex == 0) {
@@ -1559,6 +1549,23 @@ inline double getFrameRate() {
     }
     double avgDt = sum / count;
     return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// Sokol memory tracking
+// ---------------------------------------------------------------------------
+
+// Get total bytes allocated by sokol libraries
+inline int getSokolMemoryBytes() { return smemtrack_info().num_bytes; }
+
+// Get number of active allocations in sokol libraries
+inline int getSokolMemoryAllocs() { return smemtrack_info().num_allocs; }
+
+// Release sokol_gl vertex/command buffers to free memory.
+// Buffers are automatically re-allocated on the next draw call.
+// Call between frames when you know the next frame will use fewer vertices.
+inline void releaseSglBuffers() {
+    sgl_tc_context_release_buffers(SGL_DEFAULT_CONTEXT);
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,6 +1612,15 @@ inline float getMouseX() { return internal::mouseX; }
 inline float getMouseY() { return internal::mouseY; }
 inline Vec2 getMousePos() { return Vec2(internal::mouseX, internal::mouseY); }
 inline Vec2 getGlobalMousePos() { return Vec2(getGlobalMouseX(), getGlobalMouseY()); }
+
+// ---------------------------------------------------------------------------
+// Touch-as-mouse mapping
+// When enabled, the first touch point is also delivered as mouse events.
+// Useful for running desktop apps (that use mousePressed) on mobile unchanged.
+// Default: OFF. Call setTouchAsMouse(true) in setup() for mobile apps.
+// ---------------------------------------------------------------------------
+inline void setTouchAsMouse(bool enabled) { internal::touchAsMouse = enabled; }
+inline bool getTouchAsMouse() { return internal::touchAsMouse; }
 
 // ---------------------------------------------------------------------------
 // System Information
@@ -1758,19 +1774,10 @@ inline void exitApp() {
 // Screenshot
 // ---------------------------------------------------------------------------
 
-// Save screenshot (uses OS window capture feature)
-// Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
-inline bool saveScreenshot(const std::filesystem::path& path) {
-    // Convert relative paths to data path
-    if (path.is_relative()) {
-        return platform::saveScreenshot(getDataPath(path.string()));
-    }
-    return platform::saveScreenshot(path);
-}
 
 // Capture screen to Pixels
 inline bool grabScreen(Pixels& outPixels) {
-    return platform::captureWindow(outPixels);
+    return captureWindow(outPixels);
 }
 
 // ---------------------------------------------------------------------------
@@ -1839,6 +1846,7 @@ struct WindowSettings {
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
+    int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -1951,6 +1959,13 @@ namespace internal {
         }
         #endif
 
+        // Install the standard application menu on macOS so Cmd+Q etc. work
+        // out of the box. No-op on other platforms.
+        internal::installAppMenu();
+
+        // Bring window to front on startup
+        bringWindowToFront();
+
         if (appSetupFunc) appSetupFunc();
 
         // Set initial app size (must be after appSetupFunc creates the app)
@@ -1963,7 +1978,13 @@ namespace internal {
         }
     }
 
+    inline bool frameReentryGuard = false;
+
     inline void _frame_cb() {
+        // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
+        if (frameReentryGuard) return;
+        frameReentryGuard = true;
+
         auto now = std::chrono::high_resolution_clock::now();
 
         // Initialize timing
@@ -1984,11 +2005,25 @@ namespace internal {
         mcp::processHttpQueue();
         #endif
 
+        // Compute update delta time (actual elapsed since last update call)
+        auto computeUpdateDelta = [&]() {
+            if (!lastUpdateCallTimeInitialized) {
+                lastUpdateCallTimeInitialized = true;
+                lastUpdateCallTime = now;
+                updateDeltaTime = sapp_frame_duration(); // first frame: use sokol's estimate
+            } else {
+                auto callNow = std::chrono::high_resolution_clock::now();
+                updateDeltaTime = std::chrono::duration<double>(callNow - lastUpdateCallTime).count();
+                lastUpdateCallTime = callNow;
+            }
+        };
+
         // --- Update Loop processing ---
         if (updateSyncedToDraw) {
             // Synced to Draw: handled with shouldDraw below
         } else if (updateTargetFps == VSYNC) {
             // VSYNC mode (independent): update every frame
+            computeUpdateDelta();
             if (appUpdateFunc) appUpdateFunc();
         } else if (updateTargetFps > 0) {
             // Independent fixed Hz Update
@@ -1998,6 +2033,7 @@ namespace internal {
             lastUpdateTime = now;
 
             while (updateAccumulator >= updateInterval) {
+                computeUpdateDelta();
                 if (appUpdateFunc) appUpdateFunc();
                 updateAccumulator -= updateInterval;
             }
@@ -2036,6 +2072,7 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             if (updateSyncedToDraw && appUpdateFunc) {
+                computeUpdateDelta();
                 appUpdateFunc();
             }
 
@@ -2058,6 +2095,8 @@ namespace internal {
         // Save previous frame's mouse position
         pmouseX = mouseX;
         pmouseY = mouseY;
+
+        frameReentryGuard = false;
     }
 
     inline void _cleanup_cb() {
@@ -2074,10 +2113,8 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
-        // Pass event to ImGui
-        if (imguiEnabled) {
-            simgui_handle_event(ev);
-        }
+        // Notify raw event listeners (used by addons like tcxImGui)
+        events().rawEvent.notify(*ev);
 
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode = true: use as-is (coords = framebuffer size)
@@ -2204,6 +2241,72 @@ namespace internal {
                 if (appMouseScrolledFunc) appMouseScrolledFunc(ev->scroll_x, ev->scroll_y);
                 break;
             }
+            // Touch events (Android/iOS)
+            case SAPP_EVENTTYPE_TOUCHES_BEGAN:
+            case SAPP_EVENTTYPE_TOUCHES_MOVED:
+            case SAPP_EVENTTYPE_TOUCHES_ENDED:
+            case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
+                // Build TouchEventArgs from sokol touchpoints
+                TouchEventArgs touchArgs;
+                touchArgs.numTouches = ev->num_touches;
+                if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
+                    touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
+                for (int i = 0; i < touchArgs.numTouches; i++) {
+                    touchArgs.touches[i].id = (int)ev->touches[i].identifier;
+                    touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
+                    touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
+                    touchArgs.touches[i].changed = ev->touches[i].changed;
+                }
+
+                // Fire touch events
+                if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    events().touchPressed.notify(touchArgs);
+                } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    events().touchMoved.notify(touchArgs);
+                } else {
+                    touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    events().touchReleased.notify(touchArgs);
+                }
+
+                // Touch-as-mouse: map first touch to mouse events
+                if (touchAsMouse && touchArgs.numTouches > 0) {
+                    float tx = touchArgs.touches[0].x;
+                    float ty = touchArgs.touches[0].y;
+
+                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                        currentMouseButton = 0;
+                        mouseX = tx; mouseY = ty;
+                        mouseButton = 0;
+                        mousePressed = true;
+
+                        MouseEventArgs margs;
+                        margs.x = tx; margs.y = ty; margs.button = 0;
+                        events().mousePressed.notify(margs);
+                        if (appMousePressedFunc) appMousePressedFunc((int)tx, (int)ty, 0);
+                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                        float prevX = mouseX, prevY = mouseY;
+                        mouseX = tx; mouseY = ty;
+
+                        MouseDragEventArgs margs;
+                        margs.x = tx; margs.y = ty;
+                        margs.deltaX = tx - prevX; margs.deltaY = ty - prevY;
+                        margs.button = 0;
+                        events().mouseDragged.notify(margs);
+                        if (appMouseDraggedFunc) appMouseDraggedFunc((int)tx, (int)ty, 0);
+                    } else {
+                        currentMouseButton = -1;
+                        mouseX = tx; mouseY = ty;
+                        mouseButton = -1;
+                        mousePressed = false;
+
+                        MouseEventArgs margs;
+                        margs.x = tx; margs.y = ty; margs.button = 0;
+                        events().mouseReleased.notify(margs);
+                        if (appMouseReleasedFunc) appMouseReleasedFunc((int)tx, (int)ty, 0);
+                    }
+                }
+                break;
+            }
             case SAPP_EVENTTYPE_RESIZED: {
                 // Use sapp_width() (framebuffer size) instead of ev->window_width
                 // because event data might be logical size on some platforms, causing double scaling.
@@ -2253,8 +2356,10 @@ namespace internal {
 // Application execution
 // ---------------------------------------------------------------------------
 
+// Build sapp_desc without starting the event loop.
+// Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
-int runApp(const WindowSettings& settings = WindowSettings()) {
+sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     // Set pixel perfect mode
     internal::pixelPerfectMode = settings.pixelPerfect;
 
@@ -2317,12 +2422,23 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
         if (app) app->filesDropped(files);
     };
 
+    // Touch events — delivered via events() system, forwarded to App virtual methods
+    internal::touchPressedListener = events().touchPressed.listen([](TouchEventArgs& args) {
+        if (app) app->touchPressed(args);
+    });
+    internal::touchMovedListener = events().touchMoved.listen([](TouchEventArgs& args) {
+        if (app) app->touchMoved(args);
+    });
+    internal::touchReleasedListener = events().touchReleased.listen([](TouchEventArgs& args) {
+        if (app) app->touchReleased(args);
+    });
+
     // Build sapp_desc
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
         // For pixel perfect, treat specified size as framebuffer size
         // and convert to logical window size
-        float displayScale = platform::getDisplayScaleFactor();
+        float displayScale = getDisplayScaleFactor();
         desc.width = static_cast<int>(settings.width / displayScale);
         desc.height = static_cast<int>(settings.height / displayScale);
     } else {
@@ -2333,6 +2449,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;
+    desc.swap_interval = settings.swapInterval;
     desc.init_cb = internal::_setup_cb;
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
@@ -2348,11 +2465,33 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::clipboardSize = settings.clipboardSize;
-    // Run the app
-    sapp_run(&desc);
 
+    return desc;
+}
+
+// Desktop: build descriptor and run the event loop.
+// Android: sokol handles the event loop via ANativeActivity_onCreate → sokol_main().
+//          runApp() just stores the descriptor for sokol_main() to retrieve.
+#ifdef __ANDROID__
+namespace internal {
+    inline sapp_desc g_androidDesc = {};
+}
+
+template<typename AppClass>
+int runApp(const WindowSettings& settings = WindowSettings()) {
+    internal::g_androidDesc = buildAppDescriptor<AppClass>(settings);
+    // On Android, sokol_main() will return g_androidDesc.
+    // runApp() is called from sokol_main() context, so just return.
     return 0;
 }
+#else
+template<typename AppClass>
+int runApp(const WindowSettings& settings = WindowSettings()) {
+    sapp_desc desc = buildAppDescriptor<AppClass>(settings);
+    sapp_run(&desc);
+    return 0;
+}
+#endif
 
 } // namespace trussc
 
@@ -2365,6 +2504,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 // TrussC lighting (must be included before tcMesh.h)
 #include "tc/3d/tcLightingState.h"
 #include "tc/3d/tcMaterial.h"
+#include "tc/3d/tcIesProfile.h"
 #include "tc/3d/tcLight.h"
 
 // TrussC pixel buffer
@@ -2390,6 +2530,13 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 
 // TrussC mesh
 #include "tc/graphics/tcMesh.h"
+
+// TrussC image-based lighting environment (must come before the pipeline
+// so PbrPipeline::drawMesh() can call Environment methods by value)
+#include "tc/3d/tcEnvironment.h"
+
+// TrussC PBR mesh pipeline (defines Mesh::drawGpuPbr() out-of-class)
+#include "tc/3d/tcMeshPbrPipeline.h"
 
 // TrussC stroke mesh (thick line drawing)
 #include "tc/graphics/tcStrokeMesh.h"
@@ -2498,9 +2645,6 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 // TrussC EasyCam (3D camera)
 #include "tc/3d/tcEasyCam.h"
 
-// TrussC ImGui integration
-#include "tc/gui/tcImGui.h"
-
 // TrussC network
 #include "tc/network/tcUdpSocket.h"
 #include "tc/network/tcTcpClient.h"
@@ -2526,6 +2670,12 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 
 // TrussC headless mode (no window)
 #include "tc/app/tcHeadlessApp.h"
+
+// Hot reload support (must be after tcBaseApp.h — needs App class definition)
+#include "tc/app/tcHotReload.h"
+#ifdef TC_HOT_RELOAD_BUILD
+#include "tc/app/tcHotReloadHost.h"
+#endif
 
 // =============================================================================
 // Standard library includes (convenience)

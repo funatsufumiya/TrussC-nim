@@ -2954,7 +2954,7 @@ typedef enum {
 typedef struct {
     float pos[3];
     float uv[2];
-    uint32_t rgba;
+    float rgba[4];
     float psize;
 } _sgl_vertex_t;
 
@@ -3060,7 +3060,7 @@ typedef struct {
     bool in_begin;
     int layer_id;
     float u, v;
-    uint32_t rgba;
+    float rgba[4];
     float point_size;
     _sgl_primitive_type_t cur_prim_type;
     sg_view cur_view;
@@ -3071,6 +3071,8 @@ typedef struct {
     /* sokol-gfx resources */
     sg_buffer vbuf;
     int pending_grow_vertices;  /* [TrussC fork] deferred grow: if >0, grow buffer at start of next _sgl_draw */
+    sg_buffer retired_bufs[4];  /* [TrussC fork] retire list: old GPU buffers awaiting destruction */
+    int retired_count;
     sgl_pipeline def_pip;
     sg_bindings bind;
 
@@ -3355,7 +3357,7 @@ static void _sgl_init_pipeline(sgl_pipeline pip_id, const sg_pipeline_desc* in_d
     {
         sg_vertex_attr_state* rgba = &desc.layout.attrs[2];
         rgba->offset = offsetof(_sgl_vertex_t, rgba);
-        rgba->format = SG_VERTEXFORMAT_UBYTE4N;
+        rgba->format = SG_VERTEXFORMAT_FLOAT4;
     }
     {
         sg_vertex_attr_state* psize = &desc.layout.attrs[3];
@@ -3566,7 +3568,7 @@ static void _sgl_init_context(sgl_context ctx_id, const sgl_context_desc_t* in_d
     sg_pop_debug_group();
 
     // default state
-    ctx->rgba = 0xFFFFFFFF;
+    ctx->rgba[0] = 1.0f; ctx->rgba[1] = 1.0f; ctx->rgba[2] = 1.0f; ctx->rgba[3] = 1.0f;
     ctx->point_size = 1.0f;
     for (int i = 0; i < SGL_NUM_MATRIXMODES; i++) {
         _sgl_identity(&ctx->matrix_stack[i][0]);
@@ -3601,6 +3603,11 @@ static void _sgl_destroy_context(sgl_context ctx_id) {
         ctx->commands.ptr = 0;
 
         sg_push_debug_group("sokol-gl");
+        /* [TrussC fork] retire リスト内の旧バッファも破棄 */
+        for (int ri = 0; ri < ctx->retired_count; ri++) {
+            sg_destroy_buffer(ctx->retired_bufs[ri]);
+        }
+        ctx->retired_count = 0;
         sg_destroy_buffer(ctx->vbuf);
         _sgl_destroy_pipeline(ctx->def_pip);
         sg_remove_commit_listener(_sgl_make_commit_listener(ctx));
@@ -3691,16 +3698,17 @@ static _sgl_vertex_t* _sgl_next_vertex(_sgl_context_t* ctx) {
 static _sgl_uniform_t* _sgl_next_uniform(_sgl_context_t* ctx) {
     if (ctx->uniforms.next >= ctx->uniforms.cap) {
         int new_cap = (ctx->uniforms.cap > 0) ? ctx->uniforms.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
-        _sgl_uniform_t* new_ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_uniform_t));
+        _sgl_uniform_t* new_ptr;
+        if (ctx->uniforms.ptr) {
+            new_ptr = (_sgl_uniform_t*) realloc(ctx->uniforms.ptr, (size_t)new_cap * sizeof(_sgl_uniform_t));
+        } else {
+            new_ptr = (_sgl_uniform_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_uniform_t));
+        }
         if (!new_ptr) {
             ctx->error.uniforms_full = true;
             ctx->error.any = true;
             return 0;
         }
-        if (ctx->uniforms.ptr && ctx->uniforms.next > 0) {
-            memcpy(new_ptr, ctx->uniforms.ptr, (size_t)ctx->uniforms.next * sizeof(_sgl_uniform_t));
-        }
-        _sgl_free(ctx->uniforms.ptr);
         ctx->uniforms.ptr = new_ptr;
         ctx->uniforms.cap = new_cap;
     }
@@ -3719,24 +3727,21 @@ static _sgl_command_t* _sgl_cur_command(_sgl_context_t* ctx) {
 static _sgl_command_t* _sgl_next_command(_sgl_context_t* ctx) {
     if (ctx->commands.next >= ctx->commands.cap) {
         int new_cap = (ctx->commands.cap > 0) ? ctx->commands.cap * 2 : _SGL_DEFAULT_MAX_COMMANDS;
-        _sgl_command_t* new_ptr = (_sgl_command_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_command_t));
+        _sgl_command_t* new_ptr;
+        if (ctx->commands.ptr) {
+            new_ptr = (_sgl_command_t*) realloc(ctx->commands.ptr, (size_t)new_cap * sizeof(_sgl_command_t));
+        } else {
+            new_ptr = (_sgl_command_t*) _sgl_malloc((size_t)new_cap * sizeof(_sgl_command_t));
+        }
         if (!new_ptr) {
             ctx->error.commands_full = true;
             ctx->error.any = true;
             return 0;
         }
-        if (ctx->commands.ptr && ctx->commands.next > 0) {
-            memcpy(new_ptr, ctx->commands.ptr, (size_t)ctx->commands.next * sizeof(_sgl_command_t));
-        }
-        _sgl_free(ctx->commands.ptr);
         ctx->commands.ptr = new_ptr;
         ctx->commands.cap = new_cap;
     }
     return &ctx->commands.ptr[ctx->commands.next++];
-}
-
-static uint32_t _sgl_pack_rgbab(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    return (uint32_t)(((uint32_t)a<<24)|((uint32_t)b<<16)|((uint32_t)g<<8)|r);
 }
 
 static float _sgl_clamp(float v, float lo, float hi) {
@@ -3745,15 +3750,7 @@ static float _sgl_clamp(float v, float lo, float hi) {
     else return v;
 }
 
-static uint32_t _sgl_pack_rgbaf(float r, float g, float b, float a) {
-    uint8_t r_u8 = (uint8_t) (_sgl_clamp(r, 0.0f, 1.0f) * 255.0f);
-    uint8_t g_u8 = (uint8_t) (_sgl_clamp(g, 0.0f, 1.0f) * 255.0f);
-    uint8_t b_u8 = (uint8_t) (_sgl_clamp(b, 0.0f, 1.0f) * 255.0f);
-    uint8_t a_u8 = (uint8_t) (_sgl_clamp(a, 0.0f, 1.0f) * 255.0f);
-    return _sgl_pack_rgbab(r_u8, g_u8, b_u8, a_u8);
-}
-
-static void _sgl_vtx(_sgl_context_t* ctx, float x, float y, float z, float u, float v, uint32_t rgba) {
+static void _sgl_vtx(_sgl_context_t* ctx, float x, float y, float z, float u, float v, const float rgba[4]) {
     SOKOL_ASSERT(ctx->in_begin);
     _sgl_vertex_t* vtx;
     /* handle non-native primitive types */
@@ -3770,7 +3767,7 @@ static void _sgl_vtx(_sgl_context_t* ctx, float x, float y, float z, float u, fl
     if (vtx) {
         vtx->pos[0] = x; vtx->pos[1] = y; vtx->pos[2] = z;
         vtx->uv[0] = u; vtx->uv[1] = v;
-        vtx->rgba = rgba;
+        vtx->rgba[0] = rgba[0]; vtx->rgba[1] = rgba[1]; vtx->rgba[2] = rgba[2]; vtx->rgba[3] = rgba[3];
         vtx->psize = ctx->point_size;
     }
     ctx->quad_vtx_count++;
@@ -4144,7 +4141,16 @@ static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
         new_cap *= 2;
     }
     sg_push_debug_group("sokol-gl-grow-vbuf");
-    sg_destroy_buffer(ctx->vbuf);
+    /* [TrussC fork] retire old buffer instead of immediate destroy —
+       D3D11 may still reference it in the current frame's command list */
+    if (ctx->retired_count < 4) {
+        ctx->retired_bufs[ctx->retired_count++] = ctx->vbuf;
+    } else {
+        /* retire リストが満杯なら最古を破棄して詰める */
+        sg_destroy_buffer(ctx->retired_bufs[0]);
+        for (int i = 1; i < 4; i++) { ctx->retired_bufs[i-1] = ctx->retired_bufs[i]; }
+        ctx->retired_bufs[3] = ctx->vbuf;
+    }
     sg_buffer_desc vbuf_desc;
     _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
     vbuf_desc.size = (size_t)new_cap * sizeof(_sgl_vertex_t);
@@ -4157,8 +4163,9 @@ static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
     if (SG_INVALID_ID == ctx->vbuf.id) {
         return false;
     }
-    /* update capacity to match new GPU buffer (for future CPU grow decisions) */
-    ctx->vertices.cap = new_cap;
+    /* NOTE: do NOT update ctx->vertices.cap here.
+       CPU buffer cap is managed by _sgl_next_vertex auto-grow.
+       GPU buffer size is independent and tracked via sg_query_buffer_desc(). */
     return true;
 }
 
@@ -4173,6 +4180,13 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
        Vertex data is always uploaded in full for correct base_vertex indexing. */
     const int cmd_start = ctx->draw_base_cmd;
     if ((ctx->vertices.next > 0) && (ctx->commands.next > cmd_start)) {
+        /* [TrussC fork] retire リスト内の旧バッファを破棄。
+           _sgl_draw はフレーム末尾で呼ばれるので、前フレームの GPU コマンドは完了済み */
+        for (int ri = 0; ri < ctx->retired_count; ri++) {
+            sg_destroy_buffer(ctx->retired_bufs[ri]);
+        }
+        ctx->retired_count = 0;
+
         /* [TrussC fork] If a deferred grow was requested last frame, do it now
            (safe because we're at the start of a new frame's draw) */
         if (ctx->pending_grow_vertices > 0) {
@@ -4207,30 +4221,22 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         /* [TrussC fork] pre-check buffer capacity before append to avoid validation panic */
         if (data_size > 0 && sg_query_buffer_state(ctx->vbuf) == SG_RESOURCESTATE_VALID) {
             sg_buffer_desc buf_desc = sg_query_buffer_desc(ctx->vbuf);
-            int append_pos = sg_query_buffer_info(ctx->vbuf).append_pos;
-            if ((int)buf_desc.size < append_pos + (int)data_size) {
-                int needed = ((int)buf_desc.size + (int)data_size) / (int)sizeof(_sgl_vertex_t) + 1;
-#ifdef SOKOL_METAL
-                /* Metal: safe to grow immediately (ARC retains GPU resources) */
+            size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
+            if (buf_desc.size < append_pos + data_size) {
+                int needed = (int)((buf_desc.size + data_size) / sizeof(_sgl_vertex_t)) + 1;
+                /* [TrussC fork] 旧バッファは retire リストに退避されるので
+                   D3D11 でも即座に grow + 再アップロードが可能 */
                 if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                     sg_pop_debug_group();
                     return;
                 }
-#else
-                /* D3D11/Vulkan/WebGPU: defer grow to next frame to avoid
-                   driver crash from destroying in-flight buffer */
-                ctx->pending_grow_vertices = needed;
-                sg_pop_debug_group();
-                return;
-#endif
             }
         }
 
         int base_offset = sg_append_buffer(ctx->vbuf, &range);
         if (sg_query_buffer_overflow(ctx->vbuf)) {
-            /* GPU buffer too small — grow and retry (Metal) or defer (others) */
-            int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t)) + ctx->vertices.next;
-#ifdef SOKOL_METAL
+            /* [TrussC fork] GPU buffer too small — grow and retry */
+            int needed = (int)(sg_query_buffer_desc(ctx->vbuf).size / sizeof(_sgl_vertex_t) + (size_t)ctx->vertices.next);
             if (!_sgl_grow_gpu_buffer(ctx, needed)) {
                 sg_pop_debug_group();
                 return;
@@ -4240,11 +4246,6 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                 sg_pop_debug_group();
                 return;
             }
-#else
-            ctx->pending_grow_vertices = needed;
-            sg_pop_debug_group();
-            return;
-#endif
         }
         /* convert byte offset to vertex offset */
         const int vtx_offset = base_offset / (int)sizeof(_sgl_vertex_t);
@@ -4525,7 +4526,7 @@ SOKOL_API_IMPL void sgl_defaults(void) {
     }
     SOKOL_ASSERT(!ctx->in_begin);
     ctx->u = 0.0f; ctx->v = 0.0f;
-    ctx->rgba = 0xFFFFFFFF;
+    ctx->rgba[0] = 1.0f; ctx->rgba[1] = 1.0f; ctx->rgba[2] = 1.0f; ctx->rgba[3] = 1.0f;
     ctx->point_size = 1.0f;
     ctx->texturing_enabled = false;
     ctx->cur_view = _sgl.def_view;
@@ -4775,35 +4776,38 @@ SOKOL_API_IMPL void sgl_t2f(float u, float v) {
 SOKOL_API_IMPL void sgl_c3f(float r, float g, float b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        ctx->rgba = _sgl_pack_rgbaf(r, g, b, 1.0f);
+        ctx->rgba[0] = r; ctx->rgba[1] = g; ctx->rgba[2] = b; ctx->rgba[3] = 1.0f;
     }
 }
 
 SOKOL_API_IMPL void sgl_c4f(float r, float g, float b, float a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        ctx->rgba = _sgl_pack_rgbaf(r, g, b, a);
+        ctx->rgba[0] = r; ctx->rgba[1] = g; ctx->rgba[2] = b; ctx->rgba[3] = a;
     }
 }
 
 SOKOL_API_IMPL void sgl_c3b(uint8_t r, uint8_t g, uint8_t b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        ctx->rgba = _sgl_pack_rgbab(r, g, b, 255);
+        ctx->rgba[0] = r/255.0f; ctx->rgba[1] = g/255.0f; ctx->rgba[2] = b/255.0f; ctx->rgba[3] = 1.0f;
     }
 }
 
 SOKOL_API_IMPL void sgl_c4b(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        ctx->rgba = _sgl_pack_rgbab(r, g, b, a);
+        ctx->rgba[0] = r/255.0f; ctx->rgba[1] = g/255.0f; ctx->rgba[2] = b/255.0f; ctx->rgba[3] = a/255.0f;
     }
 }
 
 SOKOL_API_IMPL void sgl_c1i(uint32_t rgba) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        ctx->rgba = rgba;
+        ctx->rgba[0] = (rgba & 0xFF) / 255.0f;
+        ctx->rgba[1] = ((rgba >> 8) & 0xFF) / 255.0f;
+        ctx->rgba[2] = ((rgba >> 16) & 0xFF) / 255.0f;
+        ctx->rgba[3] = ((rgba >> 24) & 0xFF) / 255.0f;
     }
 }
 
@@ -4838,140 +4842,144 @@ SOKOL_API_IMPL void sgl_v3f_t2f(float x, float y, float z, float u, float v) {
 SOKOL_API_IMPL void sgl_v2f_c3f(float x, float y, float r, float g, float b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, _sgl_pack_rgbaf(r, g, b, 1.0f));
+        { float c[] = {r, g, b, 1.0f}; _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_c3b(float x, float y, uint8_t r, uint8_t g, uint8_t b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, _sgl_pack_rgbab(r, g, b, 255));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, 1.0f}; _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_c4f(float x, float y, float r, float g, float b, float a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, _sgl_pack_rgbaf(r, g, b, a));
+        { float c[] = {r, g, b, a}; _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_c4b(float x, float y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, _sgl_pack_rgbab(r, g, b, a));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, a/255.0f}; _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_c1i(float x, float y, uint32_t rgba) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, rgba);
+        float c[] = {(rgba & 0xFF)/255.0f, ((rgba>>8)&0xFF)/255.0f, ((rgba>>16)&0xFF)/255.0f, ((rgba>>24)&0xFF)/255.0f};
+        _sgl_vtx(ctx, x, y, 0.0f, ctx->u, ctx->v, c);
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_c3f(float x, float y, float z, float r, float g, float b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, _sgl_pack_rgbaf(r, g, b, 1.0f));
+        { float c[] = {r, g, b, 1.0f}; _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_c3b(float x, float y, float z, uint8_t r, uint8_t g, uint8_t b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, _sgl_pack_rgbab(r, g, b, 255));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, 1.0f}; _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_c4f(float x, float y, float z, float r, float g, float b, float a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, _sgl_pack_rgbaf(r, g, b, a));
+        { float c[] = {r, g, b, a}; _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_c4b(float x, float y, float z, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, _sgl_pack_rgbab(r, g, b, a));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, a/255.0f}; _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_c1i(float x, float y, float z, uint32_t rgba) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, rgba);
+        float c[] = {(rgba & 0xFF)/255.0f, ((rgba>>8)&0xFF)/255.0f, ((rgba>>16)&0xFF)/255.0f, ((rgba>>24)&0xFF)/255.0f};
+        _sgl_vtx(ctx, x, y, z, ctx->u, ctx->v, c);
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_t2f_c3f(float x, float y, float u, float v, float r, float g, float b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, u, v, _sgl_pack_rgbaf(r, g, b, 1.0f));
+        { float c[] = {r, g, b, 1.0f}; _sgl_vtx(ctx, x, y, 0.0f, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_t2f_c3b(float x, float y, float u, float v, uint8_t r, uint8_t g, uint8_t b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, u, v, _sgl_pack_rgbab(r, g, b, 255));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, 1.0f}; _sgl_vtx(ctx, x, y, 0.0f, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_t2f_c4f(float x, float y, float u, float v, float r, float g, float b, float a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, u, v, _sgl_pack_rgbaf(r, g, b, a));
+        { float c[] = {r, g, b, a}; _sgl_vtx(ctx, x, y, 0.0f, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_t2f_c4b(float x, float y, float u, float v, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, u, v, _sgl_pack_rgbab(r, g, b, a));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, a/255.0f}; _sgl_vtx(ctx, x, y, 0.0f, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v2f_t2f_c1i(float x, float y, float u, float v, uint32_t rgba) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, 0.0f, u, v, rgba);
+        float c[] = {(rgba & 0xFF)/255.0f, ((rgba>>8)&0xFF)/255.0f, ((rgba>>16)&0xFF)/255.0f, ((rgba>>24)&0xFF)/255.0f};
+        _sgl_vtx(ctx, x, y, 0.0f, u, v, c);
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_t2f_c3f(float x, float y, float z, float u, float v, float r, float g, float b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, u, v, _sgl_pack_rgbaf(r, g, b, 1.0f));
+        { float c[] = {r, g, b, 1.0f}; _sgl_vtx(ctx, x, y, z, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_t2f_c3b(float x, float y, float z, float u, float v, uint8_t r, uint8_t g, uint8_t b) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, u, v, _sgl_pack_rgbab(r, g, b, 255));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, 1.0f}; _sgl_vtx(ctx, x, y, z, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_t2f_c4f(float x, float y, float z, float u, float v, float r, float g, float b, float a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, u, v, _sgl_pack_rgbaf(r, g, b, a));
+        { float c[] = {r, g, b, a}; _sgl_vtx(ctx, x, y, z, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_t2f_c4b(float x, float y, float z, float u, float v, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx, x, y, z, u, v, _sgl_pack_rgbab(r, g, b, a));
+        { float c[] = {r/255.0f, g/255.0f, b/255.0f, a/255.0f}; _sgl_vtx(ctx, x, y, z, u, v, c); }
     }
 }
 
 SOKOL_API_IMPL void sgl_v3f_t2f_c1i(float x, float y, float z, float u, float v, uint32_t rgba) {
     _sgl_context_t* ctx = _sgl.cur_ctx;
     if (ctx) {
-        _sgl_vtx(ctx,x, y, z, u, v, rgba);
+        float c[] = {(rgba & 0xFF)/255.0f, ((rgba>>8)&0xFF)/255.0f, ((rgba>>16)&0xFF)/255.0f, ((rgba>>24)&0xFF)/255.0f};
+        _sgl_vtx(ctx, x, y, z, u, v, c);
     }
 }
 
