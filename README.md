@@ -4,7 +4,7 @@
 
 [TrussC](https://github.com/TrussC-org/TrussC) nim integration
 
-- TrussC version [v0.3.1 (2e8381a)](https://github.com/TrussC-org/TrussC/commit/2e8381a17b46edc4234925558ba336f753276e23)
+- TrussC version [v0.5.0.1 (89a15bf)](https://github.com/TrussC-org/TrussC/commit/89a15bfda41df6d1edbb2eba47aa661305572f6a)
 - nim v2.2.8
 
 ![docs/screenshot.png](docs/screenshot.png)

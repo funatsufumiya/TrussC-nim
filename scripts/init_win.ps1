@@ -1,7 +1,5 @@
-$LibUrl = 'https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/vs_x64_libs.zip'
-$DllUrl = 'https://github.com/funatsufumiya/TrussC-nim/releases/download/v0.0/vs_x64_dlls.zip'
+$LibUrl = 'https://github.com/funatsufumiya/TrussC-nim/releases/download/TrussC-v0.5.0.1/vs_x64_libs.zip'
 $LibDest = 'lib\\vs\\x64'
-$DllDest = '.'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Resolve-Path (Join-Path $scriptDir "..")
