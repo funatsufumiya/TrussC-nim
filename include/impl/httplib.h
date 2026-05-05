@@ -184,6 +184,15 @@ using ssize_t = long;
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+// Workaround for Winsock2 FD_SET/FD_ZERO macros failing to compile in some 
+// C++ environments when FAR is defined as 'far'.
+#ifdef _WIN32
+#ifdef FAR
+#undef FAR
+#define FAR
+#endif
+#endif
+
 #ifndef WSA_FLAG_NO_HANDLE_INHERIT
 #define WSA_FLAG_NO_HANDLE_INHERIT 0x80
 #endif

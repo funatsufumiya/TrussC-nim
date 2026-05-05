@@ -12,6 +12,9 @@ type
   MessageFn* = proc(msg: pointer){.cdecl.}
   ExitFn* = proc(){.cdecl.}
 
+when defined(windows):
+  {.passC: "-DFAR=".}
+
 {.emit: """
 #include <memory>
 #include "TrussC.h"
