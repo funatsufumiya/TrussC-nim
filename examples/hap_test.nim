@@ -24,10 +24,6 @@ var player: HapPlayer
 
 proc setup() {.cdecl.} =
     discard
-    # discard osc_sender.setup("127.0.0.1", 12345)
-    # discard osc_msg.setAddress("/test")
-    # discard osc_sender.send(osc_msg)
-    # discard osc_msg.clear()
 
 proc update() {.cdecl.} =
     let r: float = global.getFrameRate()
